@@ -33,3 +33,4 @@ neo4j-data/
 Thumbs.db
 .vscode/
 .idea/
+.claude/ 
