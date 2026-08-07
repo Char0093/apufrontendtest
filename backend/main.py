@@ -1,5 +1,9 @@
 from fastapi import FastAPI
 
+from backend.config import get_settings
+
+settings = get_settings()
+
 app = FastAPI(title="Corporate Brain API")
 
 

@@ -10,9 +10,10 @@ Faster-Whisper · Pyannote · Gemini 1.5 Flash · React + Vite + Tailwind · rea
 
 This repo is built incrementally against `Preliminary/` implementation plan
 (Phase 0 → Phase 7). See that plan for the full task breakdown and
-Definition of Done per task. **Status: Phase 0, Task 0.1 (project scaffolding)
-is complete** — later phases (pipeline, ASR, LLM extraction, knowledge graph,
-query APIs, frontend features) are not implemented yet.
+Definition of Done per task. **Status: Phase 0, Tasks 0.1–0.2 (project
+scaffolding, config layer) are complete** — later phases (pipeline, ASR, LLM
+extraction, knowledge graph, query APIs, frontend features) are not
+implemented yet.
 
 ## Folder structure
 
@@ -47,8 +48,14 @@ Run everything from the **repo root** so `backend` resolves as a package:
 python -m venv .venv
 .venv\Scripts\Activate.ps1   # Windows PowerShell; use .venv/bin/activate on Mac/Linux
 pip install -r backend/requirements.txt
+cp .env.example .env         # then fill in GEMINI_API_KEY and NEO4J_PASSWORD
 uvicorn backend.main:app --reload
 ```
+
+The app reads config via `backend/config.py` (Pydantic Settings) and **fails
+fast on boot** with a clear validation error if `GEMINI_API_KEY` or
+`NEO4J_PASSWORD` aren't set — every other setting has a local-dev default.
+Never commit your real `.env`; only `.env.example` is tracked.
 
 Then visit `http://127.0.0.1:8000/health` — should return `{"status": "ok"}`.
 Interactive docs at `http://127.0.0.1:8000/docs`.
@@ -72,8 +79,8 @@ commands for each target).
 
 ## Development notes
 
-- No secrets are committed. Configuration will be centralized via
-  `backend/config.py` (Pydantic Settings) in an upcoming task — see
-  `.env.example` once that lands.
+- No secrets are committed. All configuration is centralized via
+  `backend/config.py` (Pydantic Settings) — see `.env.example` for every
+  available field and which ones are required.
 - Each pipeline stage logs to its own file under `logs/` once the logging
   task is implemented.
