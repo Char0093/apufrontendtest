@@ -369,7 +369,12 @@ Projects → Relationships. Use `MERGE` to prevent duplicates.
 - [x] Task 0.1 — Initialize Monorepo (backend `app/` layout, `storage/`,
       `tests/`, Dockerfiles, frontend `src/` subdirs)
 - [x] Task 0.2 — Configuration (`app/core/config.py`, `.env.example`)
-- [x] Task 0.3 — Logging (`app/core/logger.py`: `app.log` / `worker.log` / `error.log`)
+- [~] Task 0.3 — Logging foundation done (`app/core/logger.py`: `app.log` /
+      `worker.log` / `error.log`, wired into `app/main.py` startup). Not yet
+      wired: HTTP request logging (explicitly Task 0.4's job below),
+      Celery task logging (needs 0.6 to exist), Neo4j/DB error logging
+      (needs 4.x/1.2 to exist) — each lands with its own task, not retrofit
+      onto 0.3.
 - [ ] Task 0.4 — FastAPI Initialization (CORS, exception handling, routers, request logging)
 - [ ] Task 0.5 — Docker Compose
 - [ ] Task 0.6 — Celery + Redis

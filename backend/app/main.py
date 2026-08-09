@@ -7,6 +7,7 @@ settings = get_settings()
 logger = get_logger(__name__)
 
 app = FastAPI(title="Corporate Brain API")
+logger.info("Corporate Brain API starting")
 
 
 @app.get("/")
