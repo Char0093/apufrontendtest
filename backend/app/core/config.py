@@ -8,12 +8,11 @@ class Settings(BaseSettings):
 
     gemini_api_key: str
     neo4j_uri: str = "bolt://localhost:7687"
-    neo4j_user: str = "neo4j"
+    neo4j_username: str = "neo4j"
     neo4j_password: str
-    whisper_model_size: str = "base"
     redis_url: str = "redis://localhost:6379/0"
-    storage_base_path: str = "storage"
-    sqlite_url: str = "sqlite:///./corporate_brain.db"
+    database_url: str = "sqlite:///./corporate_brain.db"
+    storage_path: str = "storage"
 
 
 @lru_cache

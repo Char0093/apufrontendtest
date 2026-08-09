@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 
-from backend.config import get_settings
+from app.core.config import get_settings
+from app.core.logger import get_logger
 
 settings = get_settings()
+logger = get_logger(__name__)
 
 app = FastAPI(title="Corporate Brain API")
 
