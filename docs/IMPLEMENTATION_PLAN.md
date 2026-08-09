@@ -375,7 +375,10 @@ Projects → Relationships. Use `MERGE` to prevent duplicates.
       Celery task logging (needs 0.6 to exist), Neo4j/DB error logging
       (needs 4.x/1.2 to exist) — each lands with its own task, not retrofit
       onto 0.3.
-- [ ] Task 0.4 — FastAPI Initialization (CORS, exception handling, routers, request logging)
+- [x] Task 0.4 — FastAPI Initialization (`GET /health`, CORS via
+      `app/core/middleware.py`, `app/core/exceptions.py`'s catch-all
+      exception handler, `app/api/` router aggregation, request logging —
+      this closes the gap noted in 0.3 above)
 - [ ] Task 0.5 — Docker Compose
 - [ ] Task 0.6 — Celery + Redis
 - [ ] Everything from Phase 1 onward

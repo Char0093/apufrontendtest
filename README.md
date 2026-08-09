@@ -11,8 +11,8 @@ Faster-Whisper · Pyannote · Gemini · React + Vite + Tailwind · react-force-g
 This repo is built incrementally against
 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — see that file for
 the full phase/task breakdown, team allocation, and the critical MVP chain.
-**Status: Phase 0, Tasks 0.1–0.3 (monorepo structure, config layer,
-logging) are complete** — Tasks 0.4+ (FastAPI init, Docker Compose,
+**Status: Phase 0, Tasks 0.1–0.4 (monorepo structure, config layer,
+logging, FastAPI init) are complete** — Tasks 0.5–0.6 (Docker Compose,
 Celery/Redis) and everything from Phase 1 onward are not implemented yet.
 
 ## Folder structure
@@ -22,8 +22,8 @@ Celery/Redis) and everything from Phase 1 onward are not implemented yet.
 ├── backend/
 │   ├── app/
 │   │   ├── main.py          # FastAPI app entrypoint
-│   │   ├── api/               # Route handlers (routers land here)
-│   │   ├── core/               # config.py (Settings), logger.py
+│   │   ├── api/               # Route handlers (health.py, more per phase)
+│   │   ├── core/               # config.py, logger.py, middleware.py, exceptions.py
 │   │   ├── database/            # DB session/engine setup, migrations
 │   │   ├── graph/                 # Neo4jService (Phase 4)
 │   │   ├── models/                 # SQLAlchemy ORM models
@@ -48,8 +48,10 @@ Celery/Redis) and everything from Phase 1 onward are not implemented yet.
 
 ## Running locally (current state)
 
-Only the backend skeleton and frontend scaffold exist so far — there is no
-Docker Compose, Celery worker, or database wiring yet (Tasks 0.4–0.6).
+The backend is a real (if minimal) FastAPI app now — CORS, a global
+exception handler, request logging, and a small pytest suite are all wired
+in. There's no Docker Compose, Celery worker, or database wiring yet
+(Tasks 0.5–0.6).
 
 ### Backend
 
@@ -73,6 +75,21 @@ Never commit your real `.env`; only `.env.example` is tracked.
 
 Then visit `http://127.0.0.1:8000/health` — should return `{"status": "ok"}`.
 Interactive docs at `http://127.0.0.1:8000/docs`.
+
+CORS is restricted to the Vite dev origins (`localhost:5173` /
+`127.0.0.1:5173`) — not wildcarded. Any exception the app doesn't handle
+itself returns a clean `{"detail": "Internal server error"}` (500) instead
+of leaking a traceback to the client; the real traceback goes to
+`backend/logs/error.log`. Every request is logged to `backend/logs/app.log`
+with method, path, status code, and duration.
+
+Run the test suite with `pytest` (from `backend/`, or `make test` from the
+repo root):
+
+```bash
+cd backend
+pytest
+```
 
 ### Frontend
 
