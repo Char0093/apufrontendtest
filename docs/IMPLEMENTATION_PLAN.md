@@ -224,7 +224,10 @@ Pyannote identifies `Speaker_0/1/2...`, aligned with Whisper timestamps.
 
 ### Task 3.1 — Design Gemini Schema
 
-`{summary, decisions: [{title, reason, evidence}], action_items: [{task, assignee, deadline}], risks, knowledge_triples: [{subject, predicate, object}]}`.
+`{summary, decisions: [{title, reason, evidence, confidence}], action_items: [{task, assignee, deadline}], risks, knowledge_triples: [{subject, predicate, object}]}`.
+
+`confidence` is one of `firm_commitment | soft_agreement | unresolved` — shown
+as a tag on every decision in the UI (Task 6.4).
 
 ### Task 3.2 — Gemini Extraction
 
@@ -246,35 +249,108 @@ Configure `NEO4J_URI/NEO4J_USERNAME/NEO4J_PASSWORD`; create a reusable
 
 ### Task 4.2 — Graph Schema
 
-Nodes: `(:Meeting) (:Person) (:Decision) (:ActionItem) (:Project)`.
-Relationships: `PARTICIPATED_IN, MADE_IN, ASSIGNED_TO, RELATES_TO`.
+Nodes: `(:Meeting) (:Person) (:Decision) (:ActionItem) (:Project) (:Policy) (:Document)`.
+Relationships: `PARTICIPATED_IN, MADE_IN, ASSIGNED_TO, RELATES_TO, CONTRADICTS
+(Decision→Decision), VIOLATES (Decision→Policy)`.
+
+`Policy`/`Document`/`VIOLATES` only need to exist if Task 4.4 (below)
+actually produces a policy-conflict flag — don't pre-populate policies by
+hand, that's out of scope; the schema just needs to support it when it
+happens.
 
 ### Task 4.3 — Graph Builder
 
 Input: `MeetingAnalysis` → Meeting → Persons → Decisions → Action Items →
 Projects → Relationships. Use `MERGE` to prevent duplicates.
 
-### Task 4.4 — Graph Verification
+### Task 4.4 — Contradiction & Flag Detection
 
-`MATCH (n) RETURN n LIMIT 50` — verify the expected relationship shapes exist.
+**This is the flagship differentiator — the feature the whole "not just a
+transcription tool" pitch depends on.** For each newly-extracted decision,
+compare it against every past decision already in the graph and raise a
+Flag if relevant.
+
+Flag shape: `{id, meeting_id, type, severity, message, detail,
+contradicts_meeting, contradicts_decision}`.
+- `type`: `contradiction | duplicate_discussion | policy_conflict | missing_stakeholder`
+- `severity`: `critical | warning | info`
+
+Two implementation paths, pick based on time available:
+- **Demo path (do this first):** keyword/topic matching — e.g. a new
+  decision mentioning "vendor"/"budget increase" against a past decision
+  containing "freeze"/"halt"/"pause" → flag it. Cheap, deterministic,
+  enough to make the two-contradicting-meetings demo work.
+- **Real path (if time allows):** embed decisions (any vector store —
+  ChromaDB is fine locally, doesn't need to be in Docker Compose) and use
+  Gemini to judge whether two semantically-similar decisions actually
+  contradict, not just resemble each other.
+
+On a real contradiction, write `(:Decision)-[:CONTRADICTS]->(:Decision)` (or
+`VIOLATES` for a policy conflict) back into the graph — this is what makes
+the flag visible on the Memory Graph page (Task 6.6) and the Meeting Detail
+flags banner (Task 6.3).
+
+### Task 4.5 — Graph Verification
+
+`MATCH (n) RETURN n LIMIT 50` — verify the expected relationship shapes
+exist, including at least one `CONTRADICTS` edge from the seed dataset
+(Task 7.3).
 
 ## PHASE 5 — Backend APIs
 
 - **5.1** `GET /meetings` — filters: keyword, project, participant, date
 - **5.2** `GET /meeting/{id}/transcript` — speaker-attributed transcript
-- **5.3** `GET /meeting/{id}/summary` — summary, decisions, action_items, risks
-- **5.4** `GET /meeting/{id}/graph-data` — `{nodes: [], links: []}` for `react-force-graph`
-- **5.5** `POST /query` — NL question → predefined Cypher template → `{answer, results, cypher}` (Cypher transparency)
+- **5.3** `GET /meeting/{id}/summary` — summary, decisions (with `confidence`),
+  action_items, risks, **flags** (from Task 4.4, each with a link to the
+  meeting/decision it conflicts with)
+- **5.4** `GET /meeting/{id}/graph-data` — `{nodes: [], links: []}` for
+  `react-force-graph`; a `CONTRADICTS` link sets `isContradiction: true` so
+  the frontend can render it distinctly (Task 6.6)
+- **5.5** `POST /query` — NL question → predefined Cypher template →
+  `{answer, results, cypher}` (Cypher transparency) — this is "Ask Coco"
+  (Task 6.7)'s backend; stays template-based, not swapped for vector
+  search/RAG
+- **5.6** `GET /users/{id}/dashboard` — `{action_items: [...], flags: [...],
+  upcoming_meetings: [...]}`, filtered to that user's own commitments and
+  the flags relevant to them — powers the personal Dashboard (Task 6.8).
+  No real auth (Task 0.2 has no user/session concept) — hardcode/mock
+  which "user" is logged in for the demo.
 
 ## PHASE 6 — React Frontend
 
-- **6.1** Meeting List (homepage, upload button, recent meetings w/ status)
+Site nav (left side menu, fixed, 5 items): **Dashboard, Meetings, Memory
+Graph, Ask Coco, Settings**. Dashboard (6.8) is the landing page — Meeting
+List (6.1) is reached via the "Meetings" nav item, not the homepage.
+
+- **6.1** Meeting List (`/meetings` — upload button, recent meetings w/ status)
 - **6.2** Upload UI (drag & drop, title, project, uploading/processing states)
-- **6.3** Meeting Detail (tabs: Summary / Transcript / Graph / Chat)
-- **6.4** Summary View (decisions, action items w/ assignee + deadline, risks)
+- **6.3** Meeting Detail (tabs: Summary / Transcript / Graph / Chat) — flags
+  banner at top if Task 4.4 raised any, each saying *why* and linking to
+  the conflicting meeting
+- **6.4** Summary View (decisions w/ `confidence` tag, action items w/
+  assignee + deadline, risks)
 - **6.5** Transcript View (timestamped, speaker-attributed, click-to-highlight)
-- **6.6** Knowledge Graph (`react-force-graph`, zoom/drag/click/highlight)
-- **6.7** Chat Interface (ask questions, see AI answers)
+- **6.6** Memory Graph (`react-force-graph`, zoom/drag/click/highlight;
+  `CONTRADICTS` edges rendered distinctly, e.g. red dashed line — this is
+  the visual "wow" screen, keep the sample dataset small/curated so it
+  never renders as an unreadable hairball)
+- **6.7** Ask Coco (chat: ask questions, see AI answers with citations
+  back to the source meeting — same Cypher-template backend as before,
+  just renamed/rebranded)
+- **6.8** Dashboard (`/dashboard`, landing page) — greeting header, the
+  current user's own action items (task/deadline/source meeting/status/
+  priority), an "AI Flags relevant to you" widget, upcoming meetings.
+  Data: Task 5.6.
+- **6.9** Settings & Roadmap (`/settings`) — mocked user profile (name,
+  email — no real login, Task 0.2 has no auth), static org info. Plus an
+  "Integrations & Roadmap" section: **Google OAuth Login** and **Live
+  Meeting Rooms** ("Coco joins your meetings live") shown as real-looking
+  but disabled/"coming soon" cards — UI only, no backend behind either.
+  This is deliberate: both are real, substantial subsystems (an auth
+  system; real-time browser audio capture) that we're not building for
+  this hackathon, but they're visible enough in a live demo that silently
+  omitting them would raise questions — this page answers "yes, we know,
+  it's on the roadmap" without having to build either.
 
 ## PHASE 7 — Demo & Product Polish
 
@@ -359,10 +435,12 @@ Projects → Relationships. Use `MERGE` to prevent duplicates.
 
 如果时间不够，不要尝试完成所有 Phase 9 的 polish。你们最少必须保证这一条链完整：
 
-**Upload → ASR → Gemini → Neo4j → Summary → Graph → Chat**
+**Upload → ASR → Gemini → Contradiction Check → Neo4j → Summary → Graph → Ask Coco**
 
-只要这条链稳定，你们就已经有一个完整的 Corporate Brain prototype；Timeline、Export、
-复杂 Search、漂亮 UI 都属于第二优先级。
+Contradiction Check（Task 4.4）现在是链条的一部分，不是可选项——这是整个 pitch
+的差异化卖点（"不只是转录工具"），至少要跑通 demo path（关键词匹配），不需要真的
+接 ChromaDB。Dashboard（6.8）、Settings/Roadmap（6.9）、Timeline、Export、复杂
+Search、漂亮 UI 都属于第二优先级。
 
 ## Status
 
@@ -379,6 +457,16 @@ Projects → Relationships. Use `MERGE` to prevent duplicates.
       `app/core/middleware.py`, `app/core/exceptions.py`'s catch-all
       exception handler, `app/api/` router aggregation, request logging —
       this closes the gap noted in 0.3 above)
-- [ ] Task 0.5 — Docker Compose
-- [ ] Task 0.6 — Celery + Redis
+- [x] Task 0.5 — Docker Compose (`docker-compose.yml`: redis, neo4j,
+      fastapi-backend, celery-worker, frontend-dev on a shared network).
+      `celery-worker` needed a minimal `app/core/celery_app.py` to exist
+      (broker/backend only, no tasks) since it's listed here but
+      `process_meeting_task` is Task 0.6's job — verified via a real
+      `docker compose up`, not just static config.
+- [x] Task 0.6 — Celery + Redis (`app/tasks/meeting_tasks.py`:
+      `process_meeting_task(meeting_id)`, a stub — logs only, since the
+      actual pipeline stages it will orchestrate don't exist until Phase
+      1-4). Verified the full chain for real: dispatched a task from a
+      separate process, confirmed the worker received and executed it
+      (SUCCESS), and that its log line landed in `worker.log`.
 - [ ] Everything from Phase 1 onward
