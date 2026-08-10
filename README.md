@@ -11,9 +11,10 @@ Faster-Whisper · Pyannote · Gemini · React + Vite + Tailwind · react-force-g
 This repo is built incrementally against
 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — see that file for
 the full phase/task breakdown, team allocation, and the critical MVP chain.
-**Status: Phase 0, Tasks 0.1–0.4 (monorepo structure, config layer,
-logging, FastAPI init) are complete** — Tasks 0.5–0.6 (Docker Compose,
-Celery/Redis) and everything from Phase 1 onward are not implemented yet.
+**Status: Phase 0 is complete** (monorepo structure, config layer, logging,
+FastAPI init, Docker Compose, Celery + Redis) — everything from Phase 1
+onward (meeting ingestion, ASR, LLM extraction, knowledge graph, query
+APIs, frontend features) is not implemented yet.
 
 ## Folder structure
 
@@ -23,7 +24,7 @@ Celery/Redis) and everything from Phase 1 onward are not implemented yet.
 │   ├── app/
 │   │   ├── main.py          # FastAPI app entrypoint
 │   │   ├── api/               # Route handlers (health.py, more per phase)
-│   │   ├── core/               # config.py, logger.py, middleware.py, exceptions.py
+│   │   ├── core/               # config.py, logger.py, middleware.py, exceptions.py, celery_app.py
 │   │   ├── database/            # DB session/engine setup, migrations
 │   │   ├── graph/                 # Neo4jService (Phase 4)
 │   │   ├── models/                 # SQLAlchemy ORM models
@@ -43,6 +44,8 @@ Celery/Redis) and everything from Phase 1 onward are not implemented yet.
 │   └── Dockerfile
 ├── docs/
 │   └── IMPLEMENTATION_PLAN.md
+├── docker-compose.yml
+├── .env.example              # secrets for `docker compose up` (separate from backend/.env.example)
 └── Makefile
 ```
 
@@ -50,8 +53,9 @@ Celery/Redis) and everything from Phase 1 onward are not implemented yet.
 
 The backend is a real (if minimal) FastAPI app now — CORS, a global
 exception handler, request logging, and a small pytest suite are all wired
-in. There's no Docker Compose, Celery worker, or database wiring yet
-(Tasks 0.5–0.6).
+in. `docker compose up` brings up all 5 services together, and the Celery
+worker has one real (stub) task registered. There's no database wiring or
+actual pipeline yet — that starts with Phase 1.
 
 ### Backend
 
@@ -91,6 +95,18 @@ cd backend
 pytest
 ```
 
+To run the Celery worker locally against a Dockerized Redis
+(`docker compose up -d redis`), without the rest of the stack:
+
+```bash
+cd backend
+celery -A app.core.celery_app worker --loglevel=info
+```
+
+`app/tasks/meeting_tasks.py` has one task registered, `process_meeting_task`
+— currently a logging stub; it starts orchestrating the real pipeline once
+Phase 1-4 land.
+
 ### Frontend
 
 ```bash
@@ -103,11 +119,29 @@ Then visit the URL Vite prints (default `http://localhost:5173`).
 
 ### Docker
 
-`backend/Dockerfile` and `frontend/Dockerfile` exist and build standalone
-images, but there's no `docker-compose.yml` yet (that's Task 0.5) and Docker
-builds haven't been verified in this environment — the local Docker daemon
-wasn't reachable when this was last touched. Sanity-check before relying on
-them: `docker build ./backend` / `docker build ./frontend`.
+```bash
+cp .env.example .env   # repo root — fill in GEMINI_API_KEY and NEO4J_PASSWORD
+docker compose up --build
+```
+
+This is a **separate `.env`, at the repo root** — not `backend/.env`. Compose
+uses this one to substitute `${GEMINI_API_KEY}`/`${NEO4J_PASSWORD}` into
+`docker-compose.yml` (for `NEO4J_AUTH` and the two Python services' secrets);
+`backend/.env` is only read when you run the backend directly, outside
+Docker. If you use both workflows, keep them in sync.
+
+Brings up all 5 services on a shared network: `redis`, `neo4j`,
+`fastapi-backend` (`:8000`), `celery-worker` (same image, runs
+`celery -A app.core.celery_app worker` instead of uvicorn), and
+`frontend-dev` (`:5173`). Neo4j Browser at `:7474`. Verified end-to-end:
+all 5 containers stay up, `/health` and `/` respond, the frontend serves
+its dev HTML, and a real task dispatched to the worker (`process_meeting_task`)
+is received and executed successfully.
+
+`docker compose down -v` to stop and remove the Neo4j volume — do this if
+you ever change `NEO4J_PASSWORD`, since the volume bakes in whatever
+password Neo4j was first created with and won't accept a different one on
+restart.
 
 ## Makefile
 
