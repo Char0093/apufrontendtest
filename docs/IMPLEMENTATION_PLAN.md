@@ -469,4 +469,20 @@ Search、漂亮 UI 都属于第二优先级。
       1-4). Verified the full chain for real: dispatched a task from a
       separate process, confirmed the worker received and executed it
       (SUCCESS), and that its log line landed in `worker.log`.
-- [ ] Everything from Phase 1 onward
+- [x] Phase 1 — Meeting Ingestion. `app/services/storage_service.py`
+      (Task 1.1); `app/database/session.py` + `app/models/meeting.py`
+      (Task 1.2, `Meeting`/`ProcessingTask`, `create_all` on startup);
+      `app/api/meetings.py` (Tasks 1.3/1.4/1.5 — `POST /meetings`,
+      `POST /upload`, `GET /task/{id}/status`); `app/tasks/meeting_tasks.py`
+      extended with real status transitions + retry/backoff (Task 1.6,
+      `max_retries=2`, exponential countdown). Verified for real: uploaded
+      a file through a running server with Redis + a live worker, watched
+      status go pending -> completed with the file saved to `storage/raw/`;
+      separately forced a permanent failure and confirmed 3 total attempts
+      (retry_count reaches 2) before landing on `failed` with the error
+      message persisted. Also caught and fixed a real bug during this: the
+      original retry code committed the "retrying" status *before* calling
+      `self.retry()`, inside a `try` that only caught
+      `MaxRetriesExceededError` — a failed commit there would have crashed
+      the task instead of retrying it.
+- [ ] Everything from Phase 2 onward

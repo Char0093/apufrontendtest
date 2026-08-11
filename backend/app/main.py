@@ -6,9 +6,13 @@ from app.core.config import get_settings
 from app.core.exceptions import unhandled_exception_handler
 from app.core.logger import get_logger
 from app.core.middleware import log_requests
+from app.database.session import Base, engine
+from app.models import meeting as _meeting_models  # noqa: F401 - registers models on Base
 
 settings = get_settings()
 logger = get_logger(__name__)
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Corporate Brain API")
 
