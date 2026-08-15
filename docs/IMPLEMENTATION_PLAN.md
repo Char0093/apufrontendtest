@@ -431,16 +431,6 @@ List (6.1) is reached via the "Meetings" nav item, not the homepage.
              └───────────────┘
 ```
 
-## The Critical MVP (最关键的 MVP)
-
-如果时间不够，不要尝试完成所有 Phase 9 的 polish。你们最少必须保证这一条链完整：
-
-**Upload → ASR → Gemini → Contradiction Check → Neo4j → Summary → Graph → Ask Coco**
-
-Contradiction Check（Task 4.4）现在是链条的一部分，不是可选项——这是整个 pitch
-的差异化卖点（"不只是转录工具"），至少要跑通 demo path（关键词匹配），不需要真的
-接 ChromaDB。Dashboard（6.8）、Settings/Roadmap（6.9）、Timeline、Export、复杂
-Search、漂亮 UI 都属于第二优先级。
 
 ## Status
 
