@@ -1,8 +1,46 @@
 # Live transcript streaming + proactive suggestions — design
 
-**Status:** Approved, pending implementation plan
+**Status:** Approved, revised after technical review, pending implementation plan
 **Date:** 2026-08-15
 **Scope:** `frontend/src/components/MeetingRoomView.tsx` and a new slice of `backend/app/`
+
+## Revisions (2026-08-15, post-review)
+
+A technical review of the first draft found 8 real gaps (2 High, 5 Medium, 1
+Low) — all verified against the actual code before accepting. This revision
+fixes 7 directly; the 8th (whether audio capture should be opt-in or
+always-on) was a product/consent decision, resolved by re-confirming
+**opt-in** with the user. Summary of what changed:
+
+- **Room presence is now tracked separately from caption capture.** The
+  original draft tied session finalization to the transcribe-WS connection
+  count, which is also what the caption toggle controlled — so toggling
+  captions off mid-call (while staying in the room) would have finalized
+  the meeting early, and a call where nobody ever toggled captions on would
+  never become a `Meeting` at all, undermining the persistence decision.
+  Fixed by splitting "is this participant still in the room" (drives
+  session lifecycle, connects automatically) from "is this participant
+  broadcasting captions right now" (opt-in, gates only whether audio is
+  sent) — see **Session lifecycle** below.
+- **Speaker identity is now verified, not client-asserted.** The original
+  draft took `identity`/`display_name` as raw WebSocket query params —
+  spoofable by any client, which matters because this transcript becomes
+  durable knowledge-graph input attributed to specific people. Fixed by
+  verifying the participant's actual LiveKit access token server-side.
+- **Live suggestions now have a demo-safe path.** The original draft's
+  contradiction judge call hits Gemini/Agnes unconditionally and fails
+  closed with no key configured — meaning the flagship live-suggestion
+  moment would silently never fire in a keyless demo, contradicting this
+  project's own demo-reliability-first precedent (`DEMO_MODE`). Fixed with
+  a deterministic keyword-based fallback judge — see **Demo-safe
+  contradiction judging** below.
+- Mic capture now explicitly must respect LiveKit mute state, captions/
+  suggestions now render locally immediately (not only via the LiveKit
+  round-trip), late joiners now hydrate transcript history from the
+  backend, the Celery task now takes a `meeting_id` (not a full transcript
+  payload), `websockets` is now an explicit dependency with Deepgram
+  KeepAlive handling, and audio format (WebM/Opus, no `encoding`/
+  `sample_rate` params) is now stated explicitly rather than left implicit.
 
 ## Problem
 
@@ -26,15 +64,14 @@ This spec adds two things to the live room:
 
 ## Decisions made (user-confirmed)
 
-These three questions were the real scope forks; all three were resolved in
-favor of the recommended option during brainstorming:
-
 1. **Post-call persistence:** when a live call ends, it becomes a real
    `Meeting` — same Gemini extraction → decisions/action items/contradiction
    pipeline as an uploaded recording. Live meetings show up in Meeting
    Intelligence, the Dashboard, and the knowledge graph exactly like
    uploads. (Rejected: ephemeral-only, or persisting the transcript without
-   re-running extraction.)
+   re-running extraction.) **Conditional on decision 3b below:** this
+   applies to calls where live transcript capture was actually used — a
+   call nobody enables it for stays exactly as ephemeral as it is today.
 2. **Suggestion scope:** contradiction flags only. Reuses the app's
    existing flagship differentiator (`contradiction_service.py`) rather than
    building a second, different kind of "related context" suggestion.
@@ -48,6 +85,19 @@ favor of the recommended option during brainstorming:
    Speech API — would feed a lower/inconsistent-quality transcript into the
    same pipeline uploads use, and doesn't reuse the Deepgram investment
    already made elsewhere in the app.)
+   - **3a. Presence tracking (added post-review):** every participant's
+     client opens a lightweight session WebSocket automatically on joining
+     the room — this drives whether a live-meeting session exists at all,
+     independent of anyone's caption preference.
+   - **3b. Capture itself stays opt-in (re-confirmed post-review):** actual
+     mic audio is only sent, and Deepgram only invoked, while a participant
+     has explicitly toggled Live Transcript on — same consent model as the
+     whiteboard/Coco/recording toggles already in the room. (Rejected:
+     always capturing regardless of the toggle — guarantees decision 1
+     unconditionally, but transcribes participants into a durable,
+     org-wide knowledge graph without a per-call opt-in, and runs billed
+     Deepgram usage on every live meeting whether or not anyone wants
+     captions.)
 
 A useful side effect of decision 3: since each caption comes from a
 specific participant's own microphone, the speaker label is that
@@ -55,39 +105,90 @@ participant's real LiveKit identity — no diarization guessing required, and
 actually more accurate than the post-hoc Deepgram diarization uploads go
 through today.
 
+## Session lifecycle
+
+This is the mechanism that fixes the review's top finding, so it's called
+out on its own rather than buried in a component list.
+
+- **On entering the live room**, every participant's client opens `WS
+  /live-meeting/{room_name}/session?token=<livekit_access_token>`
+  automatically — not gated by the caption toggle. The backend verifies
+  `token` server-side (see **Identity verification** below) and, on
+  success, increments that room's `active_connections`. This is what
+  creates the room's `LiveMeetingSession` on the first participant and
+  makes it eligible for finalization when the last one leaves — entirely
+  independent of whether captions were ever turned on.
+- **Toggling Live Transcript on** sends a `{"type": "captions_on"}` control
+  message over that same already-open connection; only from that point does
+  the client send binary audio frames, and only then does the backend open
+  a Deepgram live connection for it. **Toggling it off** (or muting the mic
+  in LiveKit — see **Frontend components**) sends `{"type":
+  "captions_off"}`, stops audio frames, and closes the Deepgram connection
+  — but the session WebSocket itself, and therefore room presence, stays
+  open.
+- **On disconnect** (tab close, leave, refresh): decrement
+  `active_connections`. If it hits 0, start a ~45s grace timer (cancelled if
+  a new connection for the same room arrives first). At expiry: if
+  `segments` is non-empty, finalize (see below); if empty, drop the session
+  — no `Meeting` row, no Celery dispatch, matching decision 3b.
+- **Finalization**: persist `segments` via `StorageService`, create the
+  `Meeting` row (`title` = room name, `file_path` = `None`), dispatch
+  `process_live_meeting_task.delay(meeting_id)` (task reads the persisted
+  segments itself — see **Celery payload** below).
+
+This keeps the feature independent of LiveKit's own room lifecycle/webhooks
+(still out of scope — see below) while fixing the bug: presence is driven by
+a connection that exists for as long as the participant is in the room, not
+by their current caption preference.
+
 ## Architecture overview
 
 ```
  participant's browser                     FastAPI backend                    external
  ─────────────────────                     ────────────────                   ────────
- mic track (already published   audio      WS /live-meeting/{room}/  audio    Deepgram
- to LiveKit) --MediaRecorder-->  chunks --> transcribe               chunks--> live streaming
-                                             (live_meeting.py)                 API
-                                                    |
-                                     caption line   | tags with this
-                                     back over WS   | connection's identity,
-                                             <-------  appends to in-memory
-                                                       LiveMeetingSession
-                                                    |
-                                                    | keyword gate + ~15s/room
-                                                    | cooldown -> passes?
-                                                    v
-                                          contradiction_service.check_text()
-                                          (embedding_service.query_similar_decisions
-                                           + Gemini judge, reused as-is)
-                                                    |
-                                     suggestion  <---
+ opens on room join   ------------------->  WS /live-meeting/{room}/
+ (session WS, token-verified,               session
+  independent of caption toggle)                  |
+                                                   | verifies token, tracks
+                                                   | active_connections
+                                                   | (session lifecycle)
+                                                   |
+ "captions_on" control msg ---------------------->|
+ mic track (already published    audio            v                  audio    Deepgram
+ to LiveKit) --MediaRecorder-->  frames -->  per-connection   ------------->   live streaming
+ (stops on toggle-off or mute)               Deepgram proxy                   API
+                                             (live_transcription_service.py)
+                                                   |
+                                     caption line  | tags with this
+                                     back over WS  | connection's VERIFIED
+                                             <------  identity, appended to
+                                                      in-memory
+                                                      LiveMeetingSession.segments
+                                                   |
+                                                   | keyword gate + ~15s/room
+                                                   | cooldown -> passes?
+                                                   v
+                                     contradiction_service.check_text()
+                                     (embedding_service.query_similar_decisions
+                                      + demo-safe judge, see below)
+                                                   |
+                                     suggestion <---
                                      back over WS (only to the
                                      connection that triggered it)
 
- receiving client republishes both captions and suggestions via
+ receiving client renders its OWN caption/suggestion locally immediately
+ (already has the data from its own WS response), AND republishes it via
  room.localParticipant.publishData(topic: 'live-transcript' | 'live-suggestion')
- -> every other participant's browser receives them via
+ -> every OTHER participant's browser receives it via
     room.on(RoomEvent.DataReceived, ...) — the exact pattern
-    CollaborativeWhiteboard.tsx already uses.
+    CollaborativeWhiteboard.tsx already uses. A late joiner additionally
+    calls GET /live-meeting/{room}/transcript-so-far once on mount to
+    hydrate history the data channel can't replay.
 
- On last disconnect + ~45s grace period, if segments is non-empty:
-   create Meeting row -> process_live_meeting_task(meeting_id, segments)
+ On active_connections reaching 0 + ~45s grace period, if segments is
+ non-empty:
+   persist segments (StorageService) -> create Meeting row
+   -> process_live_meeting_task.delay(meeting_id)
    -> _analyze_transcript() [new, shared with the upload pipeline]
    -> _save_and_graph() [existing, unchanged]
 ```
@@ -99,6 +200,21 @@ is exactly one fan-out mechanism in the codebase (the whiteboard's), not two.
 
 ## Backend components
 
+### Identity verification
+
+The session WS accepts a `token` query param — the *same* LiveKit access
+token the client already obtained from `POST /livekit/token` to join the
+room, not a free-form identity string. The handler verifies it server-side
+using `livekit_api`'s token-verification support (the package already used
+for `AccessToken` issuance in `livekit.py`; verifying a token server-side is
+the standard counterpart operation every LiveKit server SDK provides —
+exact class/method to confirm against the installed `livekit-api>=1.0,<2.0`
+version during implementation, since this codebase only exercises token
+*issuance* today, not verification) and extracts the identity/display name
+from its claims. An invalid or expired token closes the connection
+immediately with a clear reason. No caption, suggestion, or transcript line
+is ever attributed to a client-supplied string again.
+
 ### `app/services/live_transcription_service.py` (new)
 
 Thin proxy to Deepgram's live streaming WebSocket
@@ -106,23 +222,41 @@ Thin proxy to Deepgram's live streaming WebSocket
 — same `nova-2` model the existing REST path
 (`asr_service.run_deepgram_transcription`) uses, for consistent transcript
 quality/style between live and uploaded meetings. One Deepgram connection
-per client WebSocket connection. Only forwards `is_final: true` results
-upstream; interim results are used only to show a "typing"-style indicator
-client-side, never appended to the durable transcript.
+per participant, opened lazily on `captions_on` and closed on `captions_off`
+or disconnect (not held open for the whole call regardless of caption
+state — keeps idle cost at zero when nobody wants captions). Only forwards
+`is_final: true` results upstream; interim results are used only for a
+"typing"-style indicator client-side, never appended to the durable
+transcript. Sends a Deepgram `KeepAlive` message on a short interval (~5-8s)
+whenever no real audio has been forwarded recently, so a pause in speech
+doesn't time out the connection.
+
+**Audio format:** the client sends `MediaRecorder`-produced WebM/Opus chunks
+(same container the local-recording feature already uses). Per Deepgram's
+own guidance, containerized WebM/Opus omits `encoding`/`sample_rate`
+entirely (Deepgram auto-detects from the container) — the query string above
+is deliberately missing both for this reason, not by oversight.
+`MediaRecorder` + short timeslice chunking is a known rough edge for
+streaming decoders (only the first chunk carries full container/init
+headers); this needs an early smoke-test against Deepgram before building
+the rest of the feature on top of it, not just an assumption that it works.
 
 ### `app/api/live_meeting.py` (new router)
 
-`WS /live-meeting/{room_name}/transcribe?identity=...&display_name=...`
-(query params mirror `LiveKitTokenRequest`'s fields). Per connection:
+`WS /live-meeting/{room_name}/session?token=...` (renamed from an earlier
+`/transcribe` draft — this connection now represents room presence, not
+just transcription; see **Session lifecycle**). Per connection:
 
-1. Accept the WS, open a Deepgram live connection via
-   `live_transcription_service`, reject with a clear close reason if
-   `settings.deepgram_api_key` is unset (mirrors `livekit.py`'s `503` when
-   `livekit_api` isn't installed).
-2. On each finalized Deepgram result: build `{speaker: display_name,
-   identity, text, timestamp}`, append to that room's
-   `LiveMeetingSession.segments`, send it back down this client's WS.
-3. Run the keyword gate on the text; if it passes AND the room's cooldown
+1. Accept the WS, verify `token`, reject with a clear close reason on
+   failure or if `settings.deepgram_api_key` is unset.
+2. Increment `active_connections` for this room's session (creating the
+   session on first connection).
+3. On `{"type": "captions_on"}`: open a Deepgram connection via
+   `live_transcription_service`. On each finalized Deepgram result: build
+   `{speaker: verified_display_name, identity: verified_identity, text,
+   timestamp}`, append to `LiveMeetingSession.segments`, send it back down
+   this client's WS.
+4. Run the keyword gate on the text; if it passes AND the room's cooldown
    has elapsed, call `contradiction_service.check_text(text,
    exclude_meeting_id=session.id)` — `session.id` is a session uuid, not a
    real `Meeting.id` (none exists yet during a live call), but it's a safe
@@ -130,11 +264,20 @@ client-side, never appended to the durable transcript.
    exist yet, so it excludes nothing and is purely there to satisfy the
    same function signature `check_decisions()` uses post-call. On a `Flag`,
    send `{type: "contradiction_suggestion", ...flag}` back down this same
-   client's WS (not broadcast server-side — see architecture note above).
-4. On disconnect: close the Deepgram connection, decrement
-   `active_connections`; if it hits 0, schedule finalization after a ~45s
-   grace period (cancelled if a new connection for the same room arrives
-   first).
+   client's WS.
+5. On `{"type": "captions_off"}`: close this connection's Deepgram link,
+   stop appending segments from it.
+6. On disconnect: close any open Deepgram connection, decrement
+   `active_connections`; if it hits 0, schedule finalization per **Session
+   lifecycle** above.
+
+### `GET /live-meeting/{room_name}/transcript-so-far` (new)
+
+Returns the room's `LiveMeetingSession.segments` accumulated so far (empty
+list if no active session). Read-only, no side effects. Unauthenticated,
+consistent with the rest of this app's existing endpoints (`GET /meetings`
+etc. — no real auth exists anywhere yet, a known, already-documented
+limitation, not a new one introduced here).
 
 ### In-memory session registry
 
@@ -144,14 +287,8 @@ in `live_meeting.py`. `LiveMeetingSession`: `id` (uuid, independent of
 doesn't collide), `segments: list[dict]`, `active_connections: int`,
 `last_contradiction_check: float`. Single-process, in-memory state — matches
 the rest of this hackathon prototype's complexity level (SQLite, single
-Celery worker assumed); no Redis-backed session state.
-
-No `Meeting` DB row exists while the call is live. It's created only at
-finalization, exactly like an upload's `Meeting` row is created once there's
-actually a file to process — this avoids a "live" status enum value, avoids
-ever having a half-live orphaned row, and means a server restart mid-call
-simply loses that call's in-progress transcript rather than leaving stale
-DB state (acceptable for a hackathon prototype; see Out of scope).
+Celery worker assumed); no Redis-backed session state. Lost on a backend
+restart (see Out of scope).
 
 ### Keyword gate
 
@@ -169,13 +306,30 @@ New public function, extracted from the existing per-decision loop body in
 ```python
 def check_text(text: str, exclude_meeting_id: str) -> Flag | None:
     """Embed `text`, find similar past decisions from other meetings, ask
-    Gemini whether they genuinely conflict. Returns a Flag on a real
-    contradiction, None otherwise (including on any failure — fails closed)."""
+    the judge whether they genuinely conflict. Returns a Flag on a real
+    contradiction, None otherwise."""
 ```
 
 `check_decisions()` becomes a thin loop calling `check_text()` per decision —
 a behavior-preserving refactor. Existing tests covering contradiction
 detection must still pass unchanged.
+
+#### Demo-safe contradiction judging
+
+`_judge_contradiction()` currently returns `None` (no flag) whenever neither
+`gemini_api_key` nor `agnes_api_key` is configured — correct fail-closed
+behavior for an unexpected outage, but wrong for the *expected, common*
+keyless-demo configuration this project's own `DEMO_MODE` exists for: it
+would make live suggestions silently never fire during a demo. Fix: when
+both keys are empty, fall back to a deterministic keyword-based judge —
+opposing-term pairs (approve/reject, increase/freeze, proceed/halt,
+hire/layoff, and similar) checked between the new text and the matched past
+decision. This is not new scope; it's re-enabling the "Demo path" `Task
+4.4` in `docs/IMPLEMENTATION_PLAN.md` already specified before the
+embedding+Gemini "real path" superseded it — the real path stays the
+default whenever a key is configured, exactly as today. The embedding
+search itself (`query_similar_decisions`) needs no change — it runs fully
+locally via `sentence-transformers`, no API key involved.
 
 ### `app/tasks/meeting_tasks.py` (extended)
 
@@ -187,39 +341,71 @@ detection must still pass unchanged.
   step for live sessions — there's no separate video file to sample frames
   from, matching how uploads already skip vision for non-`.mp4` files.
 - Extract the generic retry/status-transition shell of `process_meeting_task`
-  (DB status transitions, retry/backoff, error persistence — currently lines
-  ~136-189) into a shared helper parameterized by which pipeline function to
-  run, so the new task reuses it instead of reimplementing retry logic.
-- New task: `process_live_meeting_task(meeting_id, segments)` — creates/loads
-  the `Meeting` row, calls `_analyze_transcript(meeting, segments,
-  on_progress)`, then the existing `_save_and_graph(meeting, intelligence)`
-  unchanged.
-- Finalization in `live_meeting.py` creates the `Meeting` row (`title` = room
-  name, `file_path` = `None`, no new status value needed — same `pending` →
-  `processing` → `completed`/`failed` lifecycle uploads already have) and
-  dispatches `process_live_meeting_task.delay(meeting_id, segments)`.
+  (DB status transitions, retry/backoff, error persistence) into a shared
+  helper parameterized by which pipeline function to run, so the new task
+  reuses it instead of reimplementing retry logic.
+- New task: `process_live_meeting_task(meeting_id)` — **takes only the
+  meeting id, not the transcript** (see below). Loads the `Meeting` row,
+  reads its persisted segments back via `StorageService`, calls
+  `_analyze_transcript(meeting, segments, on_progress)`, then the existing
+  `_save_and_graph(meeting, intelligence)` unchanged.
+
+#### Celery payload
+
+The original draft passed `segments` directly as a task argument. Fixed:
+`live_meeting.py`'s finalization step writes `segments` to storage first
+(reusing the `StorageService` abstraction the upload path already uses for
+transcripts/summaries) and dispatches
+`process_live_meeting_task.delay(meeting_id)` — mirroring exactly how
+`process_meeting_task(meeting_id)` already works for uploads (task takes an
+id, reads its real payload from disk, not from the Redis broker message).
+Avoids bloating Redis (which is both broker *and* result backend here —
+`backend/app/core/celery_app.py`) with potentially large transcript text for
+longer meetings.
 
 ## Frontend components
 
-### `useLiveTranscription` hook (new)
+### `useLiveMeetingSession` hook (new, renamed from `useLiveTranscription`)
 
-Parameters: `room`, `enabled` (bound to the toggle button). When enabled:
-opens the transcribe WS with this participant's `identity`/`displayName`,
-captures the local mic via `MediaRecorder` on a short timeslice — same
-capture technique already proven in `MeetingRecorder.tsx` — and streams
-chunks up. On each caption/suggestion received back, republishes it via
+Opens the `/session` WebSocket automatically once the participant has
+joined the LiveKit room (independent of the caption toggle — see **Session
+lifecycle**). Exposes a `captionsEnabled` control tied to the toggle button:
+turning it on sends `{"type": "captions_on"}` and starts capturing the
+local mic via `MediaRecorder` on a short timeslice — same technique already
+proven in `MeetingRecorder.tsx`, using the *same* `MediaStreamTrack` LiveKit
+already publishes (via `useTracks`), not a separate `getUserMedia()` call.
+
+**Must respect LiveKit mute state**: the hook watches
+`isLocalParticipant.isMicrophoneEnabled` (already tracked in
+`MeetingRoomView.tsx`'s `RoomContent`) and stops sending audio frames
+whenever it's `false`, sending `{"type": "captions_off"}` if captions were
+on — muting your mic in the LiveKit toolbar must stop transcription too,
+not just stop the audio *other participants* hear.
+
+On each caption/suggestion received back over its own WS response, the hook
+**renders it locally immediately** (this client already has the full
+payload — no need to wait for anything), and separately republishes it via
 `room.localParticipant.publishData(payload, {topic: 'live-transcript'})` or
-`'live-suggestion'` respectively, so every participant's browser (including
-this one) receives it through the same `RoomEvent.DataReceived` path.
+`'live-suggestion'` so every *other* participant's browser receives it
+through `RoomEvent.DataReceived`. This split matters:
+`CollaborativeWhiteboard.tsx` follows the same shape (local Excalidraw state
+updates directly; `publishData`/`DataReceived` only syncs to others) — a
+component that only rendered on the `DataReceived` round-trip would never
+show the speaker their own captions.
 
 ### `LiveTranscriptPanel.tsx` (new)
 
 New toggle button beside the existing Coco toggle in `MeetingRoomView.tsx`'s
-bottom toolbar. When on: scrolling, speaker-labeled caption feed, subscribed
-via `room.on(RoomEvent.DataReceived, handler)` filtering on the
-`'live-transcript'` topic — the exact pattern `CollaborativeWhiteboard.tsx`
-already uses (`room.on(RoomEvent.DataReceived, handleMessage)` /
-`room.localParticipant.publishData(...)`), not a different API convention.
+bottom toolbar. On mount, calls `GET
+/live-meeting/{room}/transcript-so-far` once to hydrate any history from
+before this participant joined (the LiveKit data channel has no replay/
+history of its own — this is the same late-join problem
+`docs/LIVEKIT_MEETING.md` already documents for the whiteboard, solved here
+via a backend read instead of a peer request, since the backend already
+holds the segments as source of truth and doesn't depend on any specific
+peer still being connected). Thereafter: scrolling, speaker-labeled caption
+feed, subscribed via `room.on(RoomEvent.DataReceived, handler)` filtering on
+the `'live-transcript'` topic.
 
 ### Suggestion banner
 
@@ -232,25 +418,34 @@ same way the transcript panel subscribes to `'live-transcript'`.
 
 ## Error handling
 
-Transcription is strictly opt-in (toggle button) and bolt-on — nothing about
-it can break the actual video call, which keeps working regardless of its
-state.
+Transcription capture is strictly opt-in and bolt-on — nothing about it can
+break the actual video call, which keeps working regardless of its state.
+The session WS itself is lightweight and auto-connects, but its failure
+(e.g. token rejected) only disables live-meeting-specific features, never
+the call.
 
-- Deepgram connection fails or drops mid-call → backend closes that client's
-  transcribe WS with a clear reason; frontend shows a small inline error in
-  the transcript panel (mirrors the existing `mediaError` banner pattern in
-  `MeetingRoomView.tsx`), the toggle resets to off.
-- `DEEPGRAM_API_KEY` unset → WS connection rejected immediately on first
-  attempt with a clear close reason; no separate capability-probe endpoint.
-- Gemini judge call fails during a live check → identical to today's
-  `_judge_contradiction`: fails closed, no suggestion shown, no crash.
+- Invalid/expired token → session WS connection rejected immediately with a
+  clear close reason; frontend treats this like any other connection error
+  (small inline notice, live-meeting features simply unavailable).
+- Deepgram connection fails or drops mid-call → backend closes that
+  participant's Deepgram link and sends a `captions_error` message down
+  their session WS; frontend shows a small inline error in the transcript
+  panel (mirrors the existing `mediaError` banner pattern in
+  `MeetingRoomView.tsx`), the toggle resets to off. The session WS itself
+  stays open (presence is unaffected).
+- `DEEPGRAM_API_KEY` unset → `captions_on` is rejected with a clear error
+  message; no separate capability-probe endpoint.
+- Neither Gemini nor Agnes configured → live suggestions use the
+  deterministic fallback judge (see **Demo-safe contradiction judging**),
+  not silent failure.
 - Browser lacks `MediaRecorder` or mic permission is denied → same inline
   error path the existing camera/mic toggles already use.
 - Call-end processing failure → reuses the exact retry/backoff/`failed`
   status machinery `process_meeting_task` already has, via the shared shell
   extracted above.
-- No segments accumulated (toggled on/off with nobody speaking) → finalize
-  is a no-op; no `Meeting` row, no Celery dispatch.
+- No segments accumulated (nobody ever toggled captions on, or toggled
+  on/off with nobody speaking) → finalize is a no-op; no `Meeting` row, no
+  Celery dispatch.
 
 ## Testing
 
@@ -258,18 +453,29 @@ state.
 - `check_text()` — unit tests with synthetic decision pairs; regression-check
   that `check_decisions()`'s existing behavior/tests are unchanged after the
   extraction.
+- Demo-safe judge fallback — unit test confirming a contradiction is still
+  detected via the keyword path when both `gemini_api_key` and
+  `agnes_api_key` are empty.
 - `_looks_decision_like()` — pure function, table-driven test over
   should-trigger / shouldn't-trigger phrases.
 - `_analyze_transcript()` / refactored `_run_pipeline()` — the upload path
   must produce identical output to today; run against whatever existing
   fixture `test_phase_contracts.py` already uses.
+- Token verification — a request with a missing/invalid/expired token must
+  be rejected before any segment is ever attributed to it.
+
+**First implementation step, before building the rest:** a small standalone
+spike sending real `MediaRecorder` WebM/Opus chunks to Deepgram's live
+endpoint and confirming it transcribes correctly — the audio-format risk
+flagged above is cheap to de-risk early and expensive to discover late.
 
 **Frontend:** no automated coverage for the WebSocket+MediaRecorder audio
 path (not practical to mock meaningfully). Verified manually instead: two
 browser profiles in the same live room (per the existing testing steps in
 `docs/LIVEKIT_MEETING.md`), confirming captions and a triggered contradiction
-suggestion both appear on both sides. This will be driven for real in the
-preview browser once built, not just asserted.
+suggestion both appear on both sides, muting stops captions, and a
+third profile joining late sees prior history. This will be driven for real
+in the preview browser once built, not just asserted.
 
 ## Out of scope (explicit, for hackathon focus)
 
@@ -284,10 +490,9 @@ preview browser once built, not just asserted.
   on restart; an in-progress live call's transcript-so-far would be lost
   too. Acceptable for a hackathon prototype; would need Redis-backed session
   state to fix properly.
-- LiveKit webhooks / server-side room-lifecycle integration — this feature's
-  session lifecycle is entirely defined by transcribe-WS connect/disconnect,
-  independent of LiveKit's own participant tracking.
-- A new demo-mode path for live audio itself (DEMO_MODE's existing
-  zero-external-API-calls behavior already applies for free at the
-  finalization step, since that reuses `_analyze_transcript`'s existing
-  DEMO_MODE branch — no separate handling needed).
+- LiveKit webhooks / server-side room-lifecycle integration — presence is
+  handled by the app's own lightweight session WebSocket instead (see
+  **Session lifecycle**), not by subscribing to LiveKit's server-side
+  participant events.
+- Authenticating `GET /live-meeting/{room}/transcript-so-far` — consistent
+  with the rest of this app's current no-auth state, not a new gap.
