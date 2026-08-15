@@ -18,6 +18,21 @@ services:
     networks:
       - corp-brain-net
 
+  livekit:
+    image: livekit/livekit-server
+    # --dev binds to loopback by default, which inside a container is the
+    # container's own loopback — unreachable from the host even with the
+    # port published. --node-ip must be something the host can actually
+    # reach for ICE/media (UDP 7882) to work, not the container's internal
+    # bridge IP.
+    command: --dev --bind 0.0.0.0 --node-ip 127.0.0.1
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    networks:
+      - corp-brain-net
+
   fastapi-backend:
     build: ./backend
     environment:

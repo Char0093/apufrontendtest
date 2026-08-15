@@ -151,7 +151,7 @@ export const MeetingRoomView: React.FC = () => {
   };
 
   if (joinDetails) {
-    return <LiveKitRoom token={joinDetails.token} serverUrl={joinDetails.serverUrl} connect audio video onError={(roomError) => setError(roomError.message)}><RoomAudioRenderer /><RoomContent roomName={joinDetails.roomName} displayName={joinDetails.displayName} onLeave={() => setJoinDetails(null)} /></LiveKitRoom>;
+    return <LiveKitRoom token={joinDetails.token} serverUrl={joinDetails.serverUrl} connect audio video onError={(roomError) => setError(roomError.message)}><RoomAudioRenderer /><RoomContent roomName={joinDetails.roomName} displayName={joinDetails.displayName} onLeave={() => { setJoinDetails(null); setError(''); }} /></LiveKitRoom>;
   }
 
   return (

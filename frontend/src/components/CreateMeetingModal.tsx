@@ -347,7 +347,7 @@ export const CreateMeetingModal: React.FC = () => {
             <div className="relative border-2 border-dashed border-slate-200 dark:border-slate-700/80 rounded-2xl p-4 bg-slate-50/50 dark:bg-slate-800/30 hover:border-indigo-400 transition-colors text-center">
               <input
                 type="file"
-                accept="audio/*"
+                accept="audio/*,video/mp4,.mp4"
                 onChange={handleAudioUpload}
                 className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
               />
@@ -360,7 +360,7 @@ export const CreateMeetingModal: React.FC = () => {
                 ) : (
                   <>
                     <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Click or drag audio file (MP3, WAV, M4A)
+                      Click or drag audio or video file (MP3, WAV, M4A, MP4)
                     </span>
                     <span className="text-[10px] text-slate-400">
                       Optional — Schedule now and upload recording anytime post-meeting.

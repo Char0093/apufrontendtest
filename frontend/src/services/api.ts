@@ -387,7 +387,16 @@ export function mergeBackendIntoMeeting(
   graphData: BackendGraphData | null
 ): Meeting {
   return {
-    id: base.id,
+    // Adopt the backend's real id, not whatever local placeholder the
+    // meeting was created with — e.g. AppContext.addMeeting() mints a
+    // client-only `mtg-${Date.now()}` id before any backend Meeting row
+    // exists (schedule-now-upload-later). Once a real upload happens the
+    // backend id (item.id) is the only one anything can be re-fetched by;
+    // keeping base.id here left the meeting permanently pointing at an id
+    // the backend never issued, 404ing on every later graph/export fetch.
+    // Every current caller already has base.id === item.id, so this is a
+    // no-op for them and only changes behavior for that mismatched case.
+    id: item.id,
     title: base.title,
     project: base.project,
     dateTime: base.dateTime || item.date || new Date().toISOString(),

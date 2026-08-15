@@ -58,3 +58,7 @@ MEETINGS/ASK_COCO/memory/
 ASK_COCO/
 MEETINGS/ASK_COCO/
 MEETINGS/MEETINGS/
+
+# Pitch/proposal materials (slides, recordings, videos) — not source, not
+# needed by anyone cloning the repo to run the app.
+Preliminary/

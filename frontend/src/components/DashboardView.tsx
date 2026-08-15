@@ -37,8 +37,13 @@ export const DashboardView: React.FC = () => {
   }, [meetings, currentUser]);
 
   // Filtered lists for upcoming and completed
+  // Real (non-demo) processing genuinely takes time and passes through
+  // every one of these statuses in turn — a filter that only recognized
+  // 'Preprocessing' made a meeting vanish from the dashboard the moment
+  // real progress crossed into 'ASR'/'LLM'/'Graph' (or hit 'Retrying'),
+  // since it no longer matched "upcoming" but wasn't 'Completed' either.
   const upcomingMeetings = useMemo(() => {
-    return currentUserMeetings.filter(m => m.status === 'Scheduled' || m.status === 'Pending' || m.status === 'Preprocessing');
+    return currentUserMeetings.filter(m => m.status !== 'Completed');
   }, [currentUserMeetings]);
 
   const completedMeetings = useMemo(() => {
@@ -286,16 +291,30 @@ export const DashboardView: React.FC = () => {
                       PARTICIPANTS
                     </div>
 
-                    {mtg.status === 'Preprocessing' ? (
+                    {(['Preprocessing', 'ASR', 'LLM', 'Graph', 'Retrying'] as string[]).includes(mtg.status) ? (
                       <div className="flex items-center space-x-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 animate-pulse">
                         <span className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></span>
-                        <span>Processing ASR & Extracting Decisions...</span>
+                        <span>{mtg.status === 'Retrying' ? 'Retrying after an error...' : 'Processing ASR & Extracting Decisions...'}</span>
                       </div>
+                    ) : mtg.status === 'Failed' ? (
+                      <label className="cursor-pointer px-3 py-1 bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900 border border-rose-200 dark:border-rose-800 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all shadow-2xs">
+                        <input
+                          type="file"
+                          accept="audio/*,video/mp4,.mp4"
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              processAudioForMeeting(mtg.id, e.target.files[0]);
+                            }
+                          }}
+                        />
+                        <span>Processing Failed — Retry Upload</span>
+                      </label>
                     ) : (
                       <label className="cursor-pointer px-3 py-1 bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all shadow-2xs">
                         <input
                           type="file"
-                          accept="audio/*"
+                          accept="audio/*,video/mp4,.mp4"
                           className="hidden"
                           onChange={(e) => {
                             if (e.target.files && e.target.files[0]) {

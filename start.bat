@@ -27,8 +27,8 @@ if errorlevel 2 (
 )
 echo.
 
-echo [1/4] Starting Redis + Neo4j (Docker)...
-docker compose up -d redis neo4j
+echo [1/4] Starting Redis + Neo4j + LiveKit (Docker)...
+docker compose up -d redis neo4j livekit
 if errorlevel 1 (
     echo [ERROR] Docker failed to start. Is Docker Desktop running?
     pause
