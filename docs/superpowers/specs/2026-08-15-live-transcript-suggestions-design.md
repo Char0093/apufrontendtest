@@ -42,6 +42,55 @@ always-on) was a product/consent decision, resolved by re-confirming
   KeepAlive handling, and audio format (WebM/Opus, no `encoding`/
   `sample_rate` params) is now stated explicitly rather than left implicit.
 
+### Round 2 (same day, second review pass)
+
+A second review of this document found one internal contradiction this
+revision had introduced, three more concrete hardening items, and one
+factual claim that didn't hold up under a direct check:
+
+- **Verified and rejected:** the claim that "this project currently had
+  LiveKit backend tests failing" was checked directly against this
+  session's working tree — `backend/tests/test_main.py`'s three
+  `test_livekit_token_*` tests, and the full 22-test suite, all pass
+  (`pytest`, zero failures). Recorded here so this doesn't get re-asserted
+  later without a repro; if a future run does show a failure, that's a
+  regression to investigate on its own, not a pre-existing condition.
+- **Resolved, not deferred:** token verification was flagged as an
+  implementation unknown to spike first. Checked directly against the
+  installed `livekit-api` package instead of deferring it — `TokenVerifier`
+  exists with exactly the shape needed (`.verify(token) -> Claims` with
+  `.identity`, `.name`, `.video.room`). The **Identity verification**
+  section below now states the confirmed API instead of a hedge.
+- **Fixed:** a real contradiction between two sections — one said the
+  session WS itself rejects when `DEEPGRAM_API_KEY` is unset, another said
+  only `captions_on` does. The latter is correct and is what's now written
+  throughout: presence must work with no Deepgram key at all; only caption
+  capture depends on it.
+- **Fixed:** the LiveKit token no longer travels as a WS query param
+  (logged too easily by proxies/access logs) — it's now the first message
+  sent after the socket connects, verified before any other frame is
+  processed.
+- **Fixed:** `GET .../transcript-so-far` now requires the same token,
+  checked against the room it's requesting — cheap to add given the same
+  verification already exists for the session WS, so there's no reason to
+  leave a live, real transcript open to anyone who guesses a room name.
+- **Fixed:** finalization now records `started_at`/computed `duration`
+  (reusing the `Meeting` model's existing `date`/`duration` columns — no
+  schema change needed) and generates a distinguishing title instead of
+  the bare room name, so a demo where every call uses the default
+  `team-sync` room doesn't produce indistinguishable Meeting Intelligence
+  entries.
+- **Fixed:** `_sessions` mutation (create/increment/decrement/schedule- or
+  cancel-finalization) is now specified as lock-protected — this state is
+  touched by concurrent WebSocket-handling tasks and several of those
+  operations span an `await`, which is exactly the case Python's
+  single-threaded-so-no-races intuition doesn't cover.
+- **Fixed:** the demo/keyless fallback judge now produces a distinguishably
+  labeled `Flag` (a new `judge` field) rather than being visually
+  indistinguishable from a real LLM judgment — consistent with this app's
+  existing transparency posture (Ask Coco already exposes its raw Cypher
+  for the same reason).
+
 ## Problem
 
 Live Meeting Rooms (LiveKit-based video/audio/screen-share/whiteboard, shipped
@@ -111,10 +160,11 @@ This is the mechanism that fixes the review's top finding, so it's called
 out on its own rather than buried in a component list.
 
 - **On entering the live room**, every participant's client opens `WS
-  /live-meeting/{room_name}/session?token=<livekit_access_token>`
-  automatically — not gated by the caption toggle. The backend verifies
-  `token` server-side (see **Identity verification** below) and, on
-  success, increments that room's `active_connections`. This is what
+  /live-meeting/{room_name}/session` automatically — not gated by the
+  caption toggle — then immediately sends its LiveKit access token as the
+  first frame (see **Auth handshake**). The backend verifies it server-side
+  (see **Identity verification** below) and, on success, increments that
+  room's `active_connections`. This is what
   creates the room's `LiveMeetingSession` on the first participant and
   makes it eligible for finalization when the last one leaves — entirely
   independent of whether captions were ever turned on.
@@ -132,7 +182,8 @@ out on its own rather than buried in a component list.
   `segments` is non-empty, finalize (see below); if empty, drop the session
   — no `Meeting` row, no Celery dispatch, matching decision 3b.
 - **Finalization**: persist `segments` via `StorageService`, create the
-  `Meeting` row (`title` = room name, `file_path` = `None`), dispatch
+  `Meeting` row (generated title, not the bare room name — see
+  **Finalization metadata** below; `file_path` = `None`), dispatch
   `process_live_meeting_task.delay(meeting_id)` (task reads the persisted
   segments itself — see **Celery payload** below).
 
@@ -147,11 +198,15 @@ by their current caption preference.
  participant's browser                     FastAPI backend                    external
  ─────────────────────                     ────────────────                   ────────
  opens on room join   ------------------->  WS /live-meeting/{room}/
- (session WS, token-verified,               session
-  independent of caption toggle)                  |
-                                                   | verifies token, tracks
+ (session WS, independent                   session
+  of caption toggle)                               |
+ first frame sent: {auth, token} ----------------->|
+                                                   | verifies token (never a
+                                                   | query param), tracks
                                                    | active_connections
-                                                   | (session lifecycle)
+                                                   | (session lifecycle) —
+                                                   | works with NO Deepgram
+                                                   | key configured
                                                    |
  "captions_on" control msg ---------------------->|
  mic track (already published    audio            v                  audio    Deepgram
@@ -202,18 +257,35 @@ is exactly one fan-out mechanism in the codebase (the whiteboard's), not two.
 
 ### Identity verification
 
-The session WS accepts a `token` query param — the *same* LiveKit access
-token the client already obtained from `POST /livekit/token` to join the
-room, not a free-form identity string. The handler verifies it server-side
-using `livekit_api`'s token-verification support (the package already used
-for `AccessToken` issuance in `livekit.py`; verifying a token server-side is
-the standard counterpart operation every LiveKit server SDK provides —
-exact class/method to confirm against the installed `livekit-api>=1.0,<2.0`
-version during implementation, since this codebase only exercises token
-*issuance* today, not verification) and extracts the identity/display name
-from its claims. An invalid or expired token closes the connection
-immediately with a clear reason. No caption, suggestion, or transcript line
-is ever attributed to a client-supplied string again.
+The client sends the *same* LiveKit access token it already obtained from
+`POST /livekit/token` to join the room — never a free-form identity string,
+and never as a WS query param (see **Auth handshake** below for why).
+Confirmed directly against the installed `livekit-api` package this
+session (`backend/.venv`), not left as an open question:
+
+```python
+verifier = livekit_api.TokenVerifier(settings.livekit_api_key, settings.livekit_api_secret)
+claims = verifier.verify(token)  # raises on invalid/expired signature
+identity, display_name, room = claims.identity, claims.name, claims.video.room if claims.video else None
+```
+
+`claims.video.room` is checked against the `room_name` in the URL — a
+valid token for a *different* room is rejected too, not just an invalid
+one. No caption, suggestion, or transcript line is ever attributed to a
+client-supplied string again.
+
+#### Auth handshake
+
+The token is **not** a query param. FastAPI's WebSocket flow requires
+`accept()` before any application message can be exchanged, so the sequence
+is: accept the socket, then require `{"type": "auth", "token": "..."}` as
+strictly the first frame — verify it before processing any other message
+(control or audio), and close immediately with a clear reason if the first
+frame isn't a valid auth message or the token doesn't verify. This avoids
+the token ever appearing in a URL that proxies, load balancers, or access
+logs commonly capture. (Browsers can't attach custom headers — e.g.
+`Authorization` — to a WebSocket upgrade request from JS, which is why this
+uses a first-message handshake instead of a header.)
 
 ### `app/services/live_transcription_service.py` (new)
 
@@ -243,15 +315,23 @@ the rest of the feature on top of it, not just an assumption that it works.
 
 ### `app/api/live_meeting.py` (new router)
 
-`WS /live-meeting/{room_name}/session?token=...` (renamed from an earlier
+`WS /live-meeting/{room_name}/session` (renamed from an earlier
 `/transcribe` draft — this connection now represents room presence, not
-just transcription; see **Session lifecycle**). Per connection:
+just transcription; see **Session lifecycle**). No `token` query param —
+see **Auth handshake** above. Per connection:
 
-1. Accept the WS, verify `token`, reject with a clear close reason on
-   failure or if `settings.deepgram_api_key` is unset.
-2. Increment `active_connections` for this room's session (creating the
-   session on first connection).
-3. On `{"type": "captions_on"}`: open a Deepgram connection via
+1. Accept the WS. Require `{"type": "auth", "token": "..."}` as the first
+   frame; verify it (see **Identity verification**); close with a clear
+   reason on failure. **This is the only rejection condition for the
+   session WS itself** — critically, it does **not** depend on
+   `settings.deepgram_api_key`. Presence/session tracking must work with no
+   Deepgram key configured at all; only step 3 below depends on it.
+2. Increment `active_connections` for this room's session under that
+   session's lock (creating the session on first connection — see
+   **Concurrency** below).
+3. On `{"type": "captions_on"}`: reject with a clear in-band error if
+   `settings.deepgram_api_key` is unset (this is where that check belongs —
+   see point 1); otherwise open a Deepgram connection via
    `live_transcription_service`. On each finalized Deepgram result: build
    `{speaker: verified_display_name, identity: verified_identity, text,
    timestamp}`, append to `LiveMeetingSession.segments`, send it back down
@@ -268,27 +348,63 @@ just transcription; see **Session lifecycle**). Per connection:
 5. On `{"type": "captions_off"}`: close this connection's Deepgram link,
    stop appending segments from it.
 6. On disconnect: close any open Deepgram connection, decrement
-   `active_connections`; if it hits 0, schedule finalization per **Session
-   lifecycle** above.
+   `active_connections` under the session's lock; if it hits 0, schedule
+   finalization per **Session lifecycle** above.
 
 ### `GET /live-meeting/{room_name}/transcript-so-far` (new)
 
 Returns the room's `LiveMeetingSession.segments` accumulated so far (empty
-list if no active session). Read-only, no side effects. Unauthenticated,
-consistent with the rest of this app's existing endpoints (`GET /meetings`
-etc. — no real auth exists anywhere yet, a known, already-documented
-limitation, not a new one introduced here).
+list if no active session). Read-only, no side effects. **Requires the same
+LiveKit token**, passed as `Authorization: Bearer <token>` — verified the
+same way as the session WS (see **Identity verification**), including the
+`claims.video.room == room_name` check. Unlike the rest of this app's
+current no-auth endpoints, this one serves the actual live content of an
+in-progress conversation rather than already-processed meeting records, and
+the verification needed already exists once the session WS has it — there's
+no cost reason to leave it open.
 
 ### In-memory session registry
 
 `_sessions: dict[str, LiveMeetingSession]` keyed by `room_name`, module-level
 in `live_meeting.py`. `LiveMeetingSession`: `id` (uuid, independent of
 `room_name` so a reused room name like "team-sync" across different days
-doesn't collide), `segments: list[dict]`, `active_connections: int`,
-`last_contradiction_check: float`. Single-process, in-memory state — matches
-the rest of this hackathon prototype's complexity level (SQLite, single
-Celery worker assumed); no Redis-backed session state. Lost on a backend
-restart (see Out of scope).
+doesn't collide), `started_at: datetime`, `segments: list[dict]`,
+`active_connections: int`, `last_contradiction_check: float`, `lock:
+asyncio.Lock`. Single-process, in-memory state — matches the rest of this
+hackathon prototype's complexity level (SQLite, single Celery worker
+assumed); no Redis-backed session state. Lost on a backend restart (see
+Out of scope).
+
+#### Concurrency
+
+`_sessions` is touched by every session WS's own async task, and several of
+the operations on it span an `await` (scheduling/cancelling the finalize
+grace-timer, and finalization itself, which reads segments and writes to
+storage/DB). That combination is exactly where Python's "single event loop,
+so no races" intuition breaks down — two tasks can interleave in the middle
+of a multi-step state change. Fixes:
+
+- Getting-or-creating a room's `LiveMeetingSession` (the one operation that
+  touches the `_sessions` dict itself, not a session's internals) is guarded
+  by one small module-level lock, held only for that lookup-or-insert.
+- Everything else — increment/decrement `active_connections`, schedule or
+  cancel the finalize grace-timer, run finalization — is guarded by that
+  session's own `lock`, not the module-level one, so unrelated rooms never
+  block each other.
+
+#### Finalization metadata
+
+No new `Meeting` columns needed — reuses existing nullable fields.
+`started_at` comes from the session; `ended_at` is "now" at finalization
+time. `Meeting.duration` gets the computed `HH:MM:SS` span (same format
+`_run_pipeline` already produces elsewhere), `Meeting.date` gets
+`started_at` formatted, and `Meeting.title` becomes a generated,
+distinguishing string — e.g. `f"Live: {room_name} — {started_at:%Y-%m-%d %H:%M}"`
+— instead of the bare room name, so repeated calls in the same default
+`team-sync` room (the app's own documented example room ID) don't produce
+indistinguishable Meeting Intelligence entries. Participant names need no
+separate handling — they flow into the graph the same way an upload's do,
+via `_analyze_transcript`/`_save_and_graph` once segments are processed.
 
 ### Keyword gate
 
@@ -330,6 +446,17 @@ embedding+Gemini "real path" superseded it — the real path stays the
 default whenever a key is configured, exactly as today. The embedding
 search itself (`query_similar_decisions`) needs no change — it runs fully
 locally via `sentence-transformers`, no API key involved.
+
+**Must be visibly labeled, not presented as an LLM judgment.** `Flag` gains
+one new field, `judge: str = "llm"` (default preserves every existing call
+site unchanged), set to `"keyword_fallback"` when that path produced the
+flag. The suggestion banner and any other `Flag`-rendering UI show a
+distinct label when `judge == "keyword_fallback"` (e.g. "Pattern-matched —
+not AI-verified" vs. no badge for an LLM judgment). This matches the app's
+existing transparency posture — Ask Coco already exposes its raw Cypher for
+the same reason (`docs/IMPLEMENTATION_PLAN.md` calls this "Cypher
+transparency") — a deterministic keyword match presented as if it were the
+same AI reasoning would be a step backward from that.
 
 ### `app/tasks/meeting_tasks.py` (extended)
 
@@ -461,8 +588,21 @@ the call.
 - `_analyze_transcript()` / refactored `_run_pipeline()` — the upload path
   must produce identical output to today; run against whatever existing
   fixture `test_phase_contracts.py` already uses.
-- Token verification — a request with a missing/invalid/expired token must
-  be rejected before any segment is ever attributed to it.
+- Auth handshake — a connection sending anything other than a valid
+  `{"type": "auth", "token": ...}` as its first frame (wrong message type,
+  missing/invalid/expired token, or a token valid for a *different* room)
+  must be rejected before any other message is processed and before any
+  segment is ever attributed to it. A missing/unset `DEEPGRAM_API_KEY` must
+  **not** reject the session WS itself — only a subsequent `captions_on`.
+- Concurrency — two connect/disconnect sequences for the same room in rapid
+  succession must not double-finalize, lose a pending finalize-cancellation,
+  or drop a segment; a fresh connection arriving during the grace period
+  must cancel the pending finalize.
+- Finalization metadata — generated `title`/`date`/`duration` for two
+  live meetings using the same room name on different days must be
+  distinguishable from each other.
+- Demo-safe judge labeling — a `Flag` produced by the keyword fallback must
+  carry `judge == "keyword_fallback"`, distinct from the default `"llm"`.
 
 **First implementation step, before building the rest:** a small standalone
 spike sending real `MediaRecorder` WebM/Opus chunks to Deepgram's live
@@ -494,5 +634,3 @@ in the preview browser once built, not just asserted.
   handled by the app's own lightweight session WebSocket instead (see
   **Session lifecycle**), not by subscribing to LiveKit's server-side
   participant events.
-- Authenticating `GET /live-meeting/{room}/transcript-so-far` — consistent
-  with the rest of this app's current no-auth state, not a new gap.
