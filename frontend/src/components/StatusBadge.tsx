@@ -1,12 +1,14 @@
 import React from 'react';
 import { ProcessingStatus } from '../types/meeting';
-import { 
-  Clock, 
-  Cpu, 
-  Mic, 
-  Sparkles, 
-  Share2, 
-  CheckCircle2 
+import {
+  Clock,
+  Cpu,
+  Mic,
+  Sparkles,
+  Share2,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 
 interface StatusBadgeProps {
@@ -76,6 +78,22 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
         <span className={`inline-flex items-center rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 ${sizeClasses}`}>
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
           <span>Completed</span>
+        </span>
+      );
+
+    case 'Retrying':
+      return (
+        <span className={`inline-flex items-center rounded-full bg-orange-50 text-orange-800 border border-orange-200 ${sizeClasses}`}>
+          <RefreshCw className="w-3.5 h-3.5 text-orange-600 animate-spin" />
+          <span>Retrying after error</span>
+        </span>
+      );
+
+    case 'Failed':
+      return (
+        <span className={`inline-flex items-center rounded-full bg-red-50 text-red-800 border border-red-200 ${sizeClasses}`}>
+          <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+          <span>Failed</span>
         </span>
       );
 

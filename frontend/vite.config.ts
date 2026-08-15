@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    open: true
+    // start.bat opens the browser once after the frontend server starts.
+    open: false
   }
 })

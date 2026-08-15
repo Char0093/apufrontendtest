@@ -1,0 +1,424 @@
+import type {
+  Meeting,
+  Decision,
+  ActionItem,
+  Contradiction,
+  TranscriptSegment,
+  GraphData,
+  ProcessingStatus,
+} from '../types';
+
+const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8000';
+
+// ── Backend response shapes (docs/IMPLEMENTATION_PLAN.md Phase 5) ─────────
+
+export interface BackendMeetingListItem {
+  id: string;
+  title: string;
+  project: string | null;
+  date: string | null;
+  status: string;
+  progress: number;
+  decisions_count: number;
+  action_items_count: number;
+  flags_count: number;
+}
+
+interface BackendDecision {
+  text: string;
+  title?: string;
+  reason?: string;
+  evidence?: string;
+  confidence: 'firm_commitment' | 'soft_agreement' | 'unresolved';
+  timestamp: string;
+  speaker: string;
+}
+
+interface BackendActionItem {
+  task: string;
+  assignee: string;
+  deadline: string | null;
+  priority: string;
+}
+
+interface BackendFlag {
+  type: string;
+  message: string;
+  severity: string;
+  source_decision_text?: string | null;
+  contradicts_meeting_id?: string | null;
+  contradicts_decision_text?: string | null;
+}
+
+export interface BackendSummary {
+  duration: string;
+  summary?: string;
+  participants: string[];
+  decisions: BackendDecision[];
+  action_items: BackendActionItem[];
+  flags: BackendFlag[];
+  risks?: string[];
+  knowledge_triples?: Array<{ subject: string; predicate: string; object: string }>;
+}
+
+interface BackendTranscriptLine {
+  timestamp: string;
+  speaker: string;
+  speaker_raw: string;
+  text: string;
+}
+
+export interface BackendTranscript {
+  meeting_id: string;
+  transcript: BackendTranscriptLine[];
+}
+
+interface BackendGraphNode {
+  id: string;
+  label: string;
+  type: string;
+}
+
+interface BackendGraphLink {
+  source: string;
+  target: string;
+  type: string;
+  isContradiction?: boolean;
+  message?: string;
+}
+
+export interface BackendGraphData {
+  nodes: BackendGraphNode[];
+  links: BackendGraphLink[];
+}
+
+export interface BackendTaskStatus {
+  meeting_id: string;
+  status: string;
+  progress_percentage: number;
+  error_message: string | null;
+}
+
+export interface BackendCitation {
+  filename: string;
+  timestamp: string;
+  speaker: string;
+  excerpt: string;
+}
+
+export interface BackendQueryResponse {
+  answer: string;
+  results: Array<Record<string, unknown>>;
+  cypher: string;
+  citations: BackendCitation[];
+}
+
+export interface BackendDashboard {
+  user_id: string;
+  action_items: Array<{ task: string; deadline: string | null; priority: string }>;
+  flags: Array<{ message: string; meeting_id: string | null }>;
+  upcoming_meetings: Array<{ id: string; title: string }>;
+}
+
+// ── Raw fetch calls ─────────────────────────────────────────────────────
+
+async function apiGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`);
+  if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
+  return res.json();
+}
+
+export async function listMeetings(): Promise<BackendMeetingListItem[]> {
+  return apiGet('/meetings');
+}
+
+export async function getMeetingSummary(meetingId: string): Promise<BackendSummary | null> {
+  try {
+    return await apiGet(`/meeting/${meetingId}/summary`);
+  } catch {
+    return null;
+  }
+}
+
+export async function getMeetingTranscript(meetingId: string): Promise<BackendTranscript | null> {
+  try {
+    return await apiGet(`/meeting/${meetingId}/transcript`);
+  } catch {
+    return null;
+  }
+}
+
+export async function getGraphData(meetingId: string): Promise<BackendGraphData | null> {
+  try {
+    return await apiGet(`/meeting/${meetingId}/graph-data`);
+  } catch {
+    return null;
+  }
+}
+
+/** Whole-organization graph (Task 6.6's Memory Graph page) — every
+ * meeting/person/decision/action item/contradiction at once. */
+export async function getGlobalGraphData(): Promise<BackendGraphData | null> {
+  try {
+    return await apiGet('/graph');
+  } catch {
+    return null;
+  }
+}
+
+export async function getTaskStatus(meetingId: string): Promise<BackendTaskStatus> {
+  return apiGet(`/task/${meetingId}/status`);
+}
+
+export async function uploadMeeting(
+  file: File,
+  title: string,
+  project?: string
+): Promise<{ meeting_id: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('title', title);
+  if (project) formData.append('project', project);
+
+  const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+  return res.json();
+}
+
+export async function askCoco(query: string): Promise<BackendQueryResponse> {
+  const res = await fetch(`${API_BASE}/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error(`Ask Coco failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getUserDashboard(userId: string): Promise<BackendDashboard> {
+  return apiGet(`/users/${encodeURIComponent(userId)}/dashboard`);
+}
+
+// ── Task 7.2 — Export Report ─────────────────────────────────────────────
+
+export function getMeetingExportUrl(meetingId: string): string {
+  return `${API_BASE}/meeting/${meetingId}/export`;
+}
+
+/** Fetches the report and triggers a browser download. Throws with a
+ * user-readable message on failure (e.g. meeting not on the backend yet,
+ * or still processing) — caller decides how to surface it. */
+export async function downloadMeetingReport(meetingId: string, suggestedFilename: string): Promise<void> {
+  const res = await fetch(getMeetingExportUrl(meetingId));
+  if (!res.ok) {
+    if (res.status === 202) throw new Error('Report not ready yet — this meeting is still processing.');
+    if (res.status === 404) throw new Error('This meeting has no exportable report on the backend yet.');
+    throw new Error(`Export failed: ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = suggestedFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ── Adapters: backend shapes -> existing frontend types ─────────────────
+// The frontend's Meeting/Decision/ActionItem/Contradiction types predate
+// the backend integration and have a richer shape than what the backend
+// currently produces (e.g. no per-item completion status, no rationale
+// text) — these adapters fill in reasonable values rather than leaving
+// fields undefined, so existing components render sensibly unmodified.
+
+const STATUS_MAP: Record<string, ProcessingStatus> = {
+  pending: 'Pending',
+  queued: 'Pending',
+  processing: 'Preprocessing',
+  completed: 'Completed',
+  failed: 'Failed',
+  retrying: 'Retrying',
+};
+
+export function mapBackendStatus(status: string, progress: number): ProcessingStatus {
+  if (status === 'processing') {
+    if (progress < 25) return 'Preprocessing';
+    if (progress < 55) return 'ASR';
+    if (progress < 80) return 'LLM';
+    return 'Graph';
+  }
+  return STATUS_MAP[status] || 'Pending';
+}
+
+const CONFIDENCE_SCORE: Record<string, number> = {
+  firm_commitment: 95,
+  soft_agreement: 70,
+  unresolved: 40,
+};
+
+function toDecision(d: BackendDecision, meetingId: string, idx: number): Decision {
+  return {
+    id: `${meetingId}-decision-${idx}`,
+    title: d.title || d.text,
+    rationale: d.reason || `Decided by ${d.speaker} at ${d.timestamp}.`,
+    evidence: d.evidence || `Confidence: ${d.confidence.replace('_', ' ')}.`,
+    confidenceScore: CONFIDENCE_SCORE[d.confidence] ?? 60,
+    impactLevel: d.confidence === 'firm_commitment' ? 'High' : d.confidence === 'soft_agreement' ? 'Medium' : 'Low',
+  };
+}
+
+function toActionItem(a: BackendActionItem, meetingId: string, idx: number): ActionItem {
+  const priority = a.priority || 'medium';
+  return {
+    id: `${meetingId}-action-${idx}`,
+    task: a.task,
+    assignee: a.assignee,
+    dueDate: a.deadline || 'No deadline',
+    status: 'To Do',
+    priority: (priority.charAt(0).toUpperCase() + priority.slice(1)) as 'High' | 'Medium' | 'Low',
+    meetingId,
+  };
+}
+
+const FLAG_TYPE_MAP: Record<string, Contradiction['type']> = {
+  policy_conflict: 'Policy Conflict',
+  contradiction: 'Statement Contradiction',
+  duplicate_discussion: 'Statement Contradiction',
+  missing_stakeholder: 'Statement Contradiction',
+};
+
+const FLAG_SEVERITY_MAP: Record<string, Contradiction['severity']> = {
+  critical: 'Critical',
+  warning: 'Warning',
+  info: 'Info',
+};
+
+function toContradiction(f: BackendFlag, meeting: { id: string; title: string }, idx: number): Contradiction {
+  return {
+    id: `${meeting.id}-flag-${idx}`,
+    title: f.message.length > 80 ? `${f.message.slice(0, 77)}...` : f.message,
+    type: FLAG_TYPE_MAP[f.type] || 'Statement Contradiction',
+    severity: FLAG_SEVERITY_MAP[f.severity] || 'Warning',
+    meetingA: meeting.title,
+    statementA: f.source_decision_text || '',
+    meetingB: f.contradicts_meeting_id || 'Earlier meeting',
+    statementB: f.contradicts_decision_text || '',
+    detectedAt: new Date().toISOString(),
+    recommendation: f.message,
+    status: 'Unresolved',
+  };
+}
+
+function toTranscript(lines: BackendTranscriptLine[], meetingId: string): TranscriptSegment[] {
+  return lines.map((l, idx) => ({
+    id: `${meetingId}-t-${idx}`,
+    speaker: l.speaker,
+    time: l.timestamp,
+    text: l.text,
+  }));
+}
+
+export function toGraphData(g: BackendGraphData): GraphData {
+  return {
+    nodes: g.nodes.map((n) => ({ id: n.id, name: n.label, type: n.type })),
+    links: g.links.map((l) => ({
+      source: l.source,
+      target: l.target,
+      label: l.type,
+      isContradiction: l.isContradiction,
+      message: l.message,
+    })),
+  };
+}
+
+/** Build a useful local graph while a backend graph is still being created or
+ * when the frontend is running on its bundled demo meetings. This is only a
+ * view fallback; Neo4j remains the source of truth for processed meetings. */
+export function buildLocalMeetingGraph(meeting: Meeting): GraphData {
+  const nodes: GraphData['nodes'] = [];
+  const links: GraphData['links'] = [];
+  const addNode = (node: GraphData['nodes'][number]) => {
+    if (!nodes.some((existing) => existing.id === node.id)) nodes.push(node);
+  };
+  const meetingId = `meeting:${meeting.id}`;
+
+  addNode({ id: meetingId, name: meeting.title, type: 'Meeting', meetingId: meeting.id });
+
+  meeting.participants.forEach((name) => {
+    const personId = `person:${name}`;
+    addNode({ id: personId, name, type: 'Person', meetingId: meeting.id });
+    links.push({ source: personId, target: meetingId, label: 'PARTICIPATED_IN', meetingId: meeting.id });
+  });
+
+  meeting.decisions.forEach((decision) => {
+    const decisionId = `decision:${decision.id}`;
+    addNode({ id: decisionId, name: decision.title, type: 'Decision', meetingId: meeting.id });
+    links.push({ source: decisionId, target: meetingId, label: 'MADE_IN', meetingId: meeting.id });
+  });
+
+  meeting.actionItems.forEach((item) => {
+    const actionId = `action:${item.id}`;
+    addNode({ id: actionId, name: item.task, type: 'ActionItem', meetingId: meeting.id });
+    links.push({ source: actionId, target: meetingId, label: 'MADE_IN', meetingId: meeting.id });
+    const personId = `person:${item.assignee}`;
+    addNode({ id: personId, name: item.assignee, type: 'Person', meetingId: meeting.id });
+    links.push({ source: actionId, target: personId, label: 'ASSIGNED_TO', meetingId: meeting.id });
+  });
+
+  if (meeting.project) {
+    const projectId = `project:${meeting.project}`;
+    addNode({ id: projectId, name: meeting.project, type: 'Project', meetingId: meeting.id });
+    links.push({ source: meetingId, target: projectId, label: 'RELATES_TO', meetingId: meeting.id });
+  }
+
+  return { nodes, links };
+}
+
+/** Build/refresh a frontend Meeting from backend data. `base` supplies any
+ * fields the backend doesn't have yet (e.g. scheduling metadata) and is
+ * preserved where the backend has nothing newer to offer. */
+export function mergeBackendIntoMeeting(
+  base: Partial<Meeting> & { id: string; title: string; project: string },
+  item: BackendMeetingListItem,
+  summary: BackendSummary | null,
+  transcript: BackendTranscript | null,
+  graphData: BackendGraphData | null
+): Meeting {
+  return {
+    id: base.id,
+    title: base.title,
+    project: base.project,
+    dateTime: base.dateTime || item.date || new Date().toISOString(),
+    timeRange: base.timeRange,
+    department: base.department,
+    participants: summary?.participants || base.participants || [],
+    status: mapBackendStatus(item.status, item.progress),
+    duration: summary?.duration || base.duration,
+    summary: summary?.summary || base.summary,
+    decisions: summary ? summary.decisions.map((d, i) => toDecision(d, base.id, i)) : base.decisions || [],
+    actionItems: summary ? summary.action_items.map((a, i) => toActionItem(a, base.id, i)) : base.actionItems || [],
+    transcript: transcript ? toTranscript(transcript.transcript, base.id) : base.transcript || [],
+    contradictions: summary ? summary.flags.map((f, i) => toContradiction(f, base as any, i)) : base.contradictions || [],
+    audioFileName: base.audioFileName,
+    fileSize: base.fileSize,
+    completedAt: base.completedAt,
+    graphData: graphData ? toGraphData(graphData) : base.graphData,
+  };
+}
+
+export function backendListItemToMeeting(item: BackendMeetingListItem): Meeting {
+  return {
+    id: item.id,
+    title: item.title,
+    project: item.project || 'Unassigned',
+    dateTime: item.date || new Date().toISOString(),
+    participants: [],
+    status: mapBackendStatus(item.status, item.progress),
+    decisions: [],
+    actionItems: [],
+    transcript: [],
+    contradictions: [],
+  };
+}

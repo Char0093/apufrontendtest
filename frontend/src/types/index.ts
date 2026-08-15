@@ -1,15 +1,18 @@
-export type ProcessingStatus = 
+export type ProcessingStatus =
   | 'Scheduled'
-  | 'Pending' 
-  | 'Preprocessing' 
-  | 'ASR' 
-  | 'LLM' 
-  | 'Graph' 
-  | 'Completed';
+  | 'Pending'
+  | 'Preprocessing'
+  | 'ASR'
+  | 'LLM'
+  | 'Graph'
+  | 'Completed'
+  | 'Retrying'
+  | 'Failed';
 
-export type TabType = 
+export type TabType =
   | 'dashboard'
   | 'meetings'
+  | 'memoryGraph'
   | 'directory'
   | 'messages'
   | 'coco'
@@ -100,6 +103,8 @@ export interface GraphLink {
   target: string;
   label?: string;
   meetingId?: string;
+  isContradiction?: boolean;
+  message?: string;
 }
 
 export interface GraphData {

@@ -37,7 +37,7 @@ export const MeetingIntelligenceView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-[1600px] w-full mx-auto px-8 py-6 animate-fade-in font-sans">
+    <div className="max-w-[1920px] w-full mx-auto px-8 py-6 animate-fade-in font-sans">
       {selectedMeetingId && (selectedMeeting || currentUserMeetings.find(m => m.id === selectedMeetingId)) ? (
         <MeetingDetailView
           selectedMeetingId={selectedMeetingId}

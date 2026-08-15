@@ -1,19 +1,21 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  BrainCircuit, 
-  Sparkles, 
-  CheckSquare, 
-  Calendar, 
-  ArrowRight, 
+import {
+  BrainCircuit,
+  Sparkles,
+  CheckSquare,
+  Calendar,
+  ArrowRight,
   Filter,
   Clock,
   Layers,
   Search,
   ShieldCheck,
   Zap,
-  CheckCircle2
+  CheckCircle2,
+  History,
+  Users
 } from 'lucide-react';
-import { Meeting } from '../types';
+import { Meeting, Decision } from '../types';
 
 interface MeetingIntelligenceOverviewProps {
   meetings: Meeting[];
@@ -69,8 +71,20 @@ export const MeetingIntelligenceOverview: React.FC<MeetingIntelligenceOverviewPr
     return Math.round(total / meeting.decisions.length);
   };
 
+  // Task 7.1 — Decision Timeline: every decision across every completed
+  // meeting, newest meeting first, each still linked back to its source
+  // meeting (reason/evidence come from the decision itself; participants
+  // from the parent meeting, since decisions don't carry their own list).
+  const timelineEntries = useMemo(() => {
+    return completedMeetings
+      .flatMap((mtg) =>
+        (mtg.decisions || []).map((decision) => ({ decision, meeting: mtg }))
+      )
+      .sort((a, b) => (a.meeting.dateTime < b.meeting.dateTime ? 1 : -1));
+  }, [completedMeetings]);
+
   return (
-    <div className="space-y-8 animate-fade-in pb-16 max-w-[1600px] w-full mx-auto px-8 py-6">
+    <div className="space-y-8 animate-fade-in pb-16 max-w-[1920px] w-full mx-auto px-8 py-6">
       
       {/* Hero Banner: Streamlined Vibrant Gradient Container */}
       <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 rounded-2xl p-5 sm:p-6 text-white shadow-lg relative overflow-hidden border border-blue-400/30">
@@ -152,6 +166,70 @@ export const MeetingIntelligenceOverview: React.FC<MeetingIntelligenceOverviewPr
         </div>
 
       </div>
+
+      {/* Decision Timeline Section (Task 7.1) */}
+      {timelineEntries.length > 0 && (
+        <div className="space-y-4">
+          <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white font-sans tracking-tight flex items-center gap-2">
+              <History className="w-5 h-5 text-indigo-600 dark:text-indigo-400" /> Decision Timeline
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Every decision across every meeting, most recent first — with the reasoning, evidence, and people behind it
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm max-h-[560px] overflow-y-auto">
+            <ol className="relative border-l-2 border-slate-100 dark:border-slate-800 space-y-6 ml-2">
+              {timelineEntries.map(({ decision, meeting: mtg }: { decision: Decision; meeting: Meeting }) => (
+                <li key={decision.id} className="ml-5">
+                  <span className="absolute -translate-x-1/2 w-3 h-3 rounded-full bg-indigo-500 border-2 border-white dark:border-slate-900 mt-1.5" />
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="text-[11px] font-bold text-slate-400 font-mono">{mtg.dateTime}</span>
+                    <button
+                      onClick={() => { onSelectMeetingId(mtg.id); onSelectMeeting(mtg); }}
+                      className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      {mtg.title}
+                    </button>
+                    {decision.impactLevel && (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        decision.impactLevel === 'High'
+                          ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                          : decision.impactLevel === 'Medium'
+                          ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                      }`}>
+                        {decision.impactLevel} impact
+                      </span>
+                    )}
+                  </div>
+
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">{decision.title}</h3>
+
+                  {decision.rationale && (
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                      <span className="font-semibold text-slate-400">Reason: </span>{decision.rationale}
+                    </p>
+                  )}
+                  {decision.evidence && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                      <span className="font-semibold text-slate-400">Evidence: </span>{decision.evidence}
+                    </p>
+                  )}
+
+                  {mtg.participants && mtg.participants.length > 0 && (
+                    <div className="flex items-center gap-1.5 mt-2 text-[11px] text-slate-400">
+                      <Users className="w-3 h-3" />
+                      <span>{mtg.participants.join(', ')}</span>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      )}
 
       {/* Completed Meetings Intelligence Cards Section */}
       <div className="space-y-6">

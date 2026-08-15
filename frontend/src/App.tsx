@@ -8,6 +8,7 @@ import { CreateMeetingModal } from './components/CreateMeetingModal';
 import { DirectMessageDrawer } from './components/DirectMessageDrawer';
 import { DashboardView } from './components/DashboardView';
 import { MeetingIntelligenceView } from './components/MeetingIntelligenceView';
+import { MemoryGraphView } from './components/MemoryGraphView';
 import { EmployeeDirectoryView } from './components/EmployeeDirectoryView';
 import { DirectMessagingView } from './components/DirectMessagingView';
 import { CocoChatView } from './components/CocoChatView';
@@ -27,12 +28,13 @@ const MainAppContent: React.FC = () => {
       <Header />
 
       {/* Main Body with Sidebar & Content */}
-      <div className="flex-1 flex max-w-[1600px] w-full mx-auto">
+      <div className="flex-1 flex max-w-[1920px] w-full mx-auto">
         <Sidebar />
 
         <main className="flex-1 min-w-0 overflow-y-auto">
           {activeTab === 'dashboard' && <DashboardView />}
           {activeTab === 'meetings' && <MeetingIntelligenceView />}
+          {activeTab === 'memoryGraph' && <MemoryGraphView />}
           {activeTab === 'directory' && <EmployeeDirectoryView />}
           {activeTab === 'coco' && <CocoChatView />}
           {activeTab === 'settings' && <SettingsView />}

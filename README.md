@@ -6,15 +6,14 @@ Turns raw meeting recordings into a searchable organizational knowledge graph �
 capturing not just *what* was decided, but *why*.
 
 Stack: FastAPI · Celery · Redis · SQLite (metadata) · Neo4j (knowledge graph) ·
-Faster-Whisper · Pyannote · Gemini · React + Vite + Tailwind · react-force-graph
+Deepgram · Gemini · React + Vite + Tailwind · react-force-graph
 
 This repo is built incrementally against
 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — see that file for
 the full phase/task breakdown, team allocation, and the critical MVP chain.
-**Status: Phase 0 is complete** (monorepo structure, config layer, logging,
-FastAPI init, Docker Compose, Celery + Redis) — everything from Phase 1
-onward (meeting ingestion, ASR, LLM extraction, knowledge graph, query
-APIs, frontend features) is not implemented yet.
+**Status: Phases 0–5 are implemented and the Phase 6 frontend is integrated.**
+The default launcher runs a complete deterministic demo path with no Deepgram,
+Gemini, Agnes, Groq, or other external API usage.
 
 ## Folder structure
 
@@ -49,13 +48,17 @@ APIs, frontend features) is not implemented yet.
 └── Makefile
 ```
 
-## Running locally (current state)
+## Running locally
 
-The backend is a real (if minimal) FastAPI app now — CORS, a global
-exception handler, request logging, and a small pytest suite are all wired
-in. `docker compose up` brings up all 5 services together, and the Celery
-worker has one real (stub) task registered. There's no database wiring or
-actual pipeline yet — that starts with Phase 1.
+The backend exposes meeting ingestion, demo processing, transcript and summary
+endpoints, Neo4j graph data, deterministic Ask Coco Cypher templates, and the
+personal dashboard endpoint. The frontend consumes these APIs and retains a
+local fallback when the backend is unavailable.
+
+For the safest first run, use `start.bat` and choose `D` for demo mode. The
+launcher also supports `R` for real processing, but that mode uses the keys in
+the integrated `backend/.env`; it does not read the standalone
+`MEETINGS/MEETINGS/.env`.
 
 ### Backend
 
@@ -68,13 +71,12 @@ cd backend
 python -m venv ../.venv
 ../.venv/Scripts/Activate.ps1   # Windows PowerShell; use ../.venv/bin/activate on Mac/Linux
 pip install -r requirements.txt
-cp .env.example .env            # then fill in GEMINI_API_KEY and NEO4J_PASSWORD
+cp .env.example .env            # configure NEO4J_PASSWORD for the graph
 uvicorn app.main:app --reload
 ```
 
-Config is centralized in `app/core/config.py` (Pydantic Settings) and the
-app **fails fast on boot** with a clear validation error if `GEMINI_API_KEY`
-or `NEO4J_PASSWORD` aren't set — every other setting has a local-dev default.
+Config is centralized in `app/core/config.py` (Pydantic Settings). External
+AI keys are optional in demo mode; Neo4j still needs its local password.
 Never commit your real `.env`; only `.env.example` is tracked.
 
 Then visit `http://127.0.0.1:8000/health` — should return `{"status": "ok"}`.
@@ -103,9 +105,9 @@ cd backend
 celery -A app.core.celery_app worker --loglevel=info
 ```
 
-`app/tasks/meeting_tasks.py` has one task registered, `process_meeting_task`
-— currently a logging stub; it starts orchestrating the real pipeline once
-Phase 1-4 land.
+`app/tasks/meeting_tasks.py` registers `process_meeting_task`, which runs the
+canned demo intelligence path when `DEMO_MODE=true` and the real media path
+only when demo mode is deliberately disabled.
 
 ### Frontend
 
@@ -120,23 +122,21 @@ Then visit the URL Vite prints (default `http://localhost:5173`).
 ### Docker
 
 ```bash
-cp .env.example .env   # repo root — fill in GEMINI_API_KEY and NEO4J_PASSWORD
+cp .env.example .env   # repo root — configure NEO4J_PASSWORD
 docker compose up --build
 ```
 
 This is a **separate `.env`, at the repo root** — not `backend/.env`. Compose
-uses this one to substitute `${GEMINI_API_KEY}`/`${NEO4J_PASSWORD}` into
-`docker-compose.yml` (for `NEO4J_AUTH` and the two Python services' secrets);
+uses this one to substitute `${NEO4J_PASSWORD}` and optional external keys
+into `docker-compose.yml` (for `NEO4J_AUTH` and the two Python services);
 `backend/.env` is only read when you run the backend directly, outside
 Docker. If you use both workflows, keep them in sync.
 
 Brings up all 5 services on a shared network: `redis`, `neo4j`,
 `fastapi-backend` (`:8000`), `celery-worker` (same image, runs
 `celery -A app.core.celery_app worker` instead of uvicorn), and
-`frontend-dev` (`:5173`). Neo4j Browser at `:7474`. Verified end-to-end:
-all 5 containers stay up, `/health` and `/` respond, the frontend serves
-its dev HTML, and a real task dispatched to the worker (`process_meeting_task`)
-is received and executed successfully.
+`frontend-dev` (`:5173`). Neo4j Browser at `:7474`. API and worker share the
+`backend-data` volume for SQLite metadata and generated meeting files.
 
 `docker compose down -v` to stop and remove the Neo4j volume — do this if
 you ever change `NEO4J_PASSWORD`, since the volume bakes in whatever
@@ -154,8 +154,8 @@ commands for each target).
 
 - No secrets are committed. All configuration is centralized via
   `backend/app/core/config.py` (Pydantic Settings) — see
-  `backend/.env.example` for every available field and which ones are
-  required (`GEMINI_API_KEY`, `NEO4J_PASSWORD`).
+  `backend/.env.example` for every available field. External AI keys are
+  intentionally blank in the demo configuration.
 - `backend/app/core/logger.py` provides `get_logger(name, worker=False)`,
   writing to `backend/logs/app.log` (default) or `backend/logs/worker.log`
   (Celery-side code), with everything at `ERROR` level or above also

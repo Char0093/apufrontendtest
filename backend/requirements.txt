@@ -7,3 +7,11 @@ celery==5.6.3
 redis==8.1.0
 sqlalchemy==2.0.51
 python-multipart==0.0.32
+
+# ASR + LLM intelligence pipeline (Phase 2-4)
+google-genai>=0.8.0
+opencv-python-headless==4.10.0.84
+neo4j==5.27.0
+chromadb>=0.4.0
+sentence-transformers>=2.0.0
+openai>=1.0.0

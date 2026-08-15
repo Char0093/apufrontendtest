@@ -3,9 +3,11 @@ FROM node:20-alpine
 WORKDIR /code
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
-COPY . .
+COPY --chown=node:node . .
+
+USER node
 
 EXPOSE 5173
 

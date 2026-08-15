@@ -485,4 +485,144 @@ Search、漂亮 UI 都属于第二优先级。
       `self.retry()`, inside a `try` that only caught
       `MaxRetriesExceededError` — a failed commit there would have crashed
       the task instead of retrying it.
-- [ ] Everything from Phase 2 onward
+- [x] Phase 2 — Audio Processing & ASR. `app/services/asr_service.py`
+      (`extract_audio()` via ffmpeg, `run_deepgram_transcription()`).
+      **Deviation:** uses Deepgram (transcription + diarization in one API
+      call), not Whisper + Pyannote — a teammate's separate `MEETINGS/`
+      prototype (see below) had already proven this path; its
+      `requirements.txt` listed `openai-whisper`/`pyannote.audio` but its
+      actual pipeline never called them, so they weren't ported either. No
+      separate diarization step exists because Deepgram's `diarize=true`
+      already produces speaker-labeled segments.
+- [x] Phase 3 — LLM Meeting Intelligence. `app/schemas/meeting_intelligence.py`
+      (Task 3.1 — `Decision`/`ActionItem`/`Flag`/`DecisionConfidence`/
+      `FlagType`, Pydantic-validated on parse, satisfying Task 3.3);
+      `app/services/gemini_service.py` (Task 3.2 — Gemini 2.0 Flash primary,
+      Agnes AI fallback, keyword-heuristic last resort). Contradiction
+      flagging was deliberately *not* ported into this prompt — the source
+      prototype compared against a hardcoded two-sentence "historical
+      context" string, which isn't a real comparison against stored
+      decisions; real contradiction detection is Phase 4 below.
+      `app/services/vision_service.py` also ported (Gemini/Agnes Vision
+      reads participant nameplates from sampled video frames, maps
+      `SPEAKER_XX` to real names) — not in the original Phase 3 task list,
+      but part of the same source pipeline and needed for realistic speaker
+      names in the demo dataset.
+- [x] Phase 4 — Knowledge Graph. `app/graph/neo4j_service.py` (4.1),
+      `app/graph/graph_builder.py` (4.2/4.3 — `MERGE`s Meeting/Person/
+      Decision/ActionItem/Project nodes and PARTICIPATED_IN/MADE_IN/
+      MADE_BY/ASSIGNED_TO/RELATES_TO edges; Policy/Document/VIOLATES stay
+      schema-only, unpopulated). Task 4.4 uses the **real path**:
+      `app/services/embedding_service.py` (ChromaDB + sentence-transformers,
+      `all-MiniLM-L6-v2`) embeds every decision; `app/graph/contradiction_service.py`
+      finds semantically-similar past decisions from other meetings and asks
+      Gemini to judge whether they actually conflict (not just topically
+      similar) before flagging. On a real contradiction, `graph_builder.write_contradiction()`
+      writes `(:Decision)-[:CONTRADICTS]->(:Decision)`. Verified for real
+      (Task 4.5): ran the full pipeline in `DEMO_MODE`, confirmed via
+      `GET /meeting/{id}/graph-data` that a `CONTRADICTS` edge with
+      `isContradiction: true` was created against a seeded prior decision.
+- [x] Phase 5 — Backend APIs. 5.1 `GET /meetings` (keyword/project/
+      participant/date filters), 5.2 `GET /meeting/{id}/transcript`,
+      5.3 `GET /meeting/{id}/summary` (decisions/action_items/flags),
+      5.4 `GET /meeting/{id}/graph-data` (`{nodes, links}`, `CONTRADICTS`
+      links carry `isContradiction: true`) — all in `app/api/meetings.py`/
+      `app/api/graph.py`. 5.5 `POST /query` uses safe predefined,
+      parameterized Cypher templates and returns `{answer, results, cypher}`
+      with an empty compatibility `citations` list. 5.6
+      `GET /users/{id}/dashboard` returns the user's action items, relevant
+      contradiction flags, and upcoming meetings.
+      `app/tasks/meeting_tasks.py`'s `process_meeting_task` now orchestrates
+      all of Phase 2-4 for real (previously a stub); `DEMO_MODE=true` runs
+      the whole chain on canned data with zero external API calls, for
+      reliable demoing/testing (Task 9.2).
+- [~] Phase 6 — React Frontend. Not built from scratch this pass — the
+      components already existed (from earlier frontend work) and ran
+      entirely on `mock/mockData.ts`. Wired to the real backend: `AppContext.tsx`
+      now fetches `GET /meetings` (+ per-meeting summary/transcript/graph-data)
+      on load and merges real meetings ahead of the bundled mock data;
+      `processAudioForMeeting()` now does a real `POST /upload` + status
+      poll for actual `File` uploads (falls back to the old client-only
+      simulation if the backend is unreachable or for non-File placeholders).
+      `CocoChatView.tsx` now calls the real `POST /query` per message instead
+      of local keyword-matched fake replies. `KnowledgeGraphView.tsx` now
+      renders `CONTRADICTS` links distinctly (red dashed, per Task 6.6 —
+      previously all links were a flat constant color). Task 6.6's Memory
+      Graph is now also a dedicated top-level nav item (`MemoryGraphView.tsx`
+      + a new `GET /graph` backend endpoint returning the whole
+      cross-meeting graph, not just one meeting) — closes the frontend-nav
+      gap noted earlier (previously the graph only existed as a per-meeting
+      tab). Verified via TypeScript and production builds. Other Phase 6 views
+      (`MeetingDetailView`, dashboard cards, etc.) needed no direct changes:
+      they already consume meetings via `useApp()`, so real data flows
+      through automatically. **Not done:** `MeetingDashboard.tsx`/
+      `UploadModal.tsx`/`PostMeetingUploadModal.tsx` are dead code (not
+      reachable from `App.tsx`'s tab routing — confirmed by tracing the
+      render tree) and were left alone rather than wired for no reason.
+      A live browser click-through with Docker/Neo4j remains the final
+      demo-day check.
+
+### MEETINGS/ and ASK COCO/ — resolved
+
+A teammate had separately built `MEETINGS/` and `ASK COCO/` as standalone,
+unintegrated FastAPI apps at the repo root (own storage, own env vars, own
+ports) implementing much of Phase 2/3/5.5 outside this architecture — see
+git history around "Add MEETINGS and ASK COCO modules securely". That logic
+has now been ported into `backend/app/` (Phases 2-5 above); the two folders
+are reference-only going forward, not the running system.
+
+- [x] Phase 6.9 — Settings & Roadmap. `SettingsView.tsx` gained an
+      "Integrations & Roadmap" card: Google OAuth Login + Live Meeting
+      Rooms, both shown as real-looking but disabled "Coming Soon" cards.
+      UI only, no backend, as specified.
+- [x] Task 7.1 — Decision Timeline. Added to `MeetingIntelligenceOverview.tsx`
+      as a chronological cross-meeting list (reason/evidence/participants,
+      newest meeting first), linking back to the source meeting. Additive
+      section on the existing hub page rather than a new nav item/route.
+- [x] Task 7.2 — Export Report. Backend: `GET /meeting/{id}/export` in
+      `app/api/meetings.py` renders the meeting's summary as a Markdown
+      report (`Content-Disposition: attachment`); 404 if the meeting
+      doesn't exist, 202 if the summary isn't ready yet. Frontend: the
+      "Export Report" button in `MeetingDetailView.tsx` — previously just
+      `alert(...)` — now calls `api.downloadMeetingReport()` and saves the
+      real file, with a friendly error message on failure instead of a
+      broken download.
+- [x] Task 7.3 — Demo Dataset. `graph_builder.seed_demo_history()` now
+      seeds a second, earlier meeting ("Q1 Vendor Risk Review") connected
+      to the existing Q2 seed via a shared attendee, so `DEMO_MODE=true`
+      produces a real 3-meeting connected story (Q1 -> Q2 -> the processed
+      meeting's CONTRADICTS edge) instead of one isolated contradiction.
+      Doesn't touch `DEMO_SEED_MEETING_ID`/`DEMO_SEED_DECISION_TEXT` or the
+      pre-baked Flag, so the existing Task 4.5 guarantee is untouched.
+- [x] Task 7.4 — Loading & Error States. Added a distinct `'Retrying'`
+      status (`StatusBadge.tsx`, orange, previously indistinguishable from
+      normal `'Preprocessing'`) and a one-time in-app notification with the
+      real backend `error_message` the first time a meeting's processing
+      task retries after an error (`AppContext.tsx`), mirroring the
+      existing failed-notification pattern.
+- [x] Task 0.3 leftover — Neo4j/DB error logging. `neo4j_service.py`
+      switched from an unused stdlib logger to `app.core.logger.get_logger`
+      and now logs (then re-raises unchanged) driver/query failures.
+      `database/session.py`'s `get_db()` now logs unhandled exceptions that
+      escape a request before FastAPI's existing catch-all handles them.
+      Both are log-then-reraise, so no caller's error handling changed.
+- [x] Task 8.1/8.3 — `backend/tests/test_export.py` added: 404/202/200
+      paths for the new export endpoint plus a pure unit test of the
+      Markdown formatter. Full suite (18 tests across all files) passes in
+      an isolated `backend/.venv` with zero regressions from the changes
+      above.
+- [~] Task 8.5 — Docker deploy. Static review only (no live fresh-machine
+      run): `docker compose config` validates cleanly; both Dockerfiles
+      already bind `--host 0.0.0.0` (the common container-networking
+      footgun); `app/main.py` already wraps Neo4j constraint setup in
+      try/except so a slow-starting Neo4j container logs a warning instead
+      of crashing FastAPI. No fixes needed, but nobody has actually run
+      `docker compose up` on a clean machine to confirm.
+- [x] Task 9.1 — `docs/DEMO_SCRIPT.md` added: the upload -> summary ->
+      transcript -> graph -> Ask Coco -> Cypher transparency -> timeline ->
+      export walkthrough, plus a "what to do if it breaks live" section.
+- [~] Task 9.2 — Backup demo. Not a separate artifact: `DEMO_MODE=true`
+      (Phase 5's existing zero-external-API-calls path) is what
+      `DEMO_SCRIPT.md` designates as the backup, now backed by the >=3
+      meeting story from Task 7.3 above rather than a thinner 2-meeting one.
+      No dedicated backup dataset beyond `DEMO_MODE` was built.

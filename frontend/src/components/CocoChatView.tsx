@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { askCoco } from '../services/api';
 import { 
   Sparkles, 
   Send, 
@@ -32,7 +33,7 @@ export const CocoChatView: React.FC = () => {
     {
       id: 'coco-init-1',
       sender: 'coco',
-      text: 'Hello Alex! I am **Coco AI**, your Corporate Brain enterprise assistant. I continuously index recorded meetings, graph neural dependencies, and audit policy compliance. How can I assist your executive decisions today?',
+      text: 'Hello Alex. I am Coco, your Corporate Brain assistant. Ask me about indexed meetings, decisions, action items, participants, or contradictions.',
       timestamp: '10:00 AM'
     }
   ]);
@@ -61,46 +62,47 @@ export const CocoChatView: React.FC = () => {
     setInputPrompt('');
     setIsTyping(true);
 
-    // Simulate AI inference & Cypher graph query generation
-    setTimeout(() => {
-      let reply: ChatMessage;
+    (async () => {
+      const nowTs = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-      if (promptText.toLowerCase().includes('contradiction')) {
-        reply = {
+      try {
+        const result = await askCoco(promptText);
+
+        const citationRows = result.citations.map(c => [c.filename, c.timestamp, c.speaker, c.excerpt]);
+        const reply: ChatMessage = citationRows.length > 0
+          ? {
+              id: `coco-${Date.now()}`,
+              sender: 'coco',
+              text: result.answer,
+              timestamp: nowTs(),
+              type: 'table',
+              tableData: {
+                headers: ['Meeting', 'Timestamp', 'Speaker', 'Excerpt'],
+                rows: citationRows
+              },
+              cypherQuery: result.cypher
+            }
+          : {
+              id: `coco-${Date.now()}`,
+              sender: 'coco',
+              text: result.answer,
+              timestamp: nowTs(),
+              cypherQuery: result.cypher
+            };
+
+        setMessages(prev => [...prev, reply]);
+      } catch (e) {
+        console.warn('[Corporate Brain] Ask Coco backend unreachable:', e);
+        setMessages(prev => [...prev, {
           id: `coco-${Date.now()}`,
           sender: 'coco',
-          text: `Found **${contradictions.length} active policy contradictions** across indexed meeting logs:`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          type: 'contradiction_summary',
-          cypherQuery: `MATCH (m1:Meeting)-[:DECIDED]->(d1:Policy) MATCH (m2:Meeting)-[:DECIDED]->(d2:Policy) WHERE d1.topic = d2.topic AND d1.limit != d2.limit RETURN m1, m2, d1, d2;`
-        };
-      } else if (promptText.toLowerCase().includes('sarah') || promptText.toLowerCase().includes('action')) {
-        reply = {
-          id: `coco-${Date.now()}`,
-          sender: 'coco',
-          text: 'Here are the current high-priority action items assigned to **Sarah Jenkins**:',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          type: 'table',
-          tableData: {
-            headers: ['Task Description', 'Due Date', 'Status', 'Priority'],
-            rows: [
-              ['Finalize GPU Cluster procurement proposal', '2026-08-14', 'In Progress', 'High'],
-              ['Submit AWS 4-bit quantization benchmark', '2026-08-16', 'To Do', 'Medium']
-            ]
-          }
-        };
-      } else {
-        reply = {
-          id: `coco-${Date.now()}`,
-          sender: 'coco',
-          text: `### Executive Briefing Synthesis\nBased on transcript analysis from **${meetings[0]?.title}**:\n\n- **Compute Scaling**: Engineering requested $240,000 for AWS GPU expansion.\n- **Budget Threshold**: CFO set $180,000 cap.\n- **Recommendation**: Deploy 4-bit model quantization to reduce compute footprint by 30%.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
+          text: `**${contradictions.length} contradictions** and ${meetings.length} meetings are indexed locally, but I can't reach the Ask Coco backend right now — is it running?`,
+          timestamp: nowTs()
+        }]);
+      } finally {
+        setIsTyping(false);
       }
-
-      setMessages(prev => [...prev, reply]);
-      setIsTyping(false);
-    }, 1200);
+    })();
   };
 
   const copyToClipboard = (id: string, text: string) => {
@@ -110,7 +112,7 @@ export const CocoChatView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-[1600px] w-full mx-auto px-8 py-6 h-[calc(100vh-6rem)] animate-fade-in flex flex-col font-sans">
+    <div className="max-w-[1920px] w-full mx-auto px-8 py-6 h-[calc(100vh-6rem)] animate-fade-in flex flex-col font-sans">
       
       {/* Header */}
       <div className="pb-4 border-b border-slate-200 dark:border-slate-800 mb-4 shrink-0 flex items-center justify-between">
@@ -120,14 +122,14 @@ export const CocoChatView: React.FC = () => {
             <span>Coco AI Assistant (Interactive Chat Agent)</span>
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            RAG-powered conversational engine grounded in enterprise meeting knowledge graphs.
+            Deterministic, transparent queries over the enterprise meeting graph.
           </p>
         </div>
 
         <div className="flex items-center space-x-2 text-xs">
           <span className="px-2.5 py-1 bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-400 rounded-lg font-semibold flex items-center space-x-1">
             <Cpu className="w-3.5 h-3.5" />
-            <span>GPT-4o + Cypher Graph</span>
+            <span>Neo4j Template Queries</span>
           </span>
         </div>
       </div>

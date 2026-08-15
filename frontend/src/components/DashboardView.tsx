@@ -16,6 +16,7 @@ export const DashboardView: React.FC = () => {
   const { 
     meetings, 
     currentUser, 
+    personalDashboard,
     setActiveTab,
     processAudioForMeeting
   } = useApp();
@@ -67,7 +68,7 @@ export const DashboardView: React.FC = () => {
   }, [completedMeetings, projectFilter, searchQuery]);
 
   return (
-    <div className="max-w-[1600px] w-full mx-auto px-8 py-6 space-y-6 font-sans animate-fade-in pb-16">
+    <div className="max-w-[1920px] w-full mx-auto px-8 py-6 space-y-6 font-sans animate-fade-in pb-16">
       
       {/* Sub-Header Row - Clean without secondary logo or duplicate buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200/80 dark:border-slate-800">
@@ -101,8 +102,8 @@ export const DashboardView: React.FC = () => {
           </p>
         </div>
 
-        {/* 3 Metric Counts */}
-        <div className="flex items-center space-x-8 pt-4 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 dark:border-slate-800 md:pl-8 shrink-0">
+        {/* Personal graph metrics */}
+        <div className="flex items-center gap-6 pt-4 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 dark:border-slate-800 md:pl-8 shrink-0">
           <div className="text-center">
             <div className="text-3xl font-extrabold text-indigo-600 dark:text-indigo-400 font-mono">
               {currentUserMeetings.length}
@@ -122,6 +123,20 @@ export const DashboardView: React.FC = () => {
               {completedMeetings.length}
             </div>
             <div className="text-xs font-semibold text-slate-400 mt-0.5">Completed</div>
+          </div>
+
+          <div className="text-center">
+            <div className="text-3xl font-extrabold text-rose-500 font-mono">
+              {personalDashboard?.flags.length ?? 0}
+            </div>
+            <div className="text-xs font-semibold text-slate-400 mt-0.5">Your Flags</div>
+          </div>
+
+          <div className="text-center">
+            <div className="text-3xl font-extrabold text-violet-500 font-mono">
+              {personalDashboard?.action_items.length ?? 0}
+            </div>
+            <div className="text-xs font-semibold text-slate-400 mt-0.5">Your Tasks</div>
           </div>
         </div>
       </div>

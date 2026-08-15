@@ -27,6 +27,10 @@ backend/storage/summaries/*
 backend/storage/exports/*
 !backend/storage/**/.gitkeep
 backend/logs/*.log
+backend/*.db
+backend/storage/chroma/
+*.db
+logs/
 neo4j-data/
 
 # OS / editor
@@ -38,3 +42,19 @@ Thumbs.db
 MEETINGS/uploads/
 MEETINGS/results/
 ASK COCO/memory/
+
+# Teammate's real working copies (moved in under MEETINGS/) — contain real
+# uploaded meeting videos, real transcripts, and a populated Chroma DB with
+# real meeting content. Source code (pipeline.py etc.) at MEETINGS/ root and
+# MEETINGS/MEETINGS/*.py stays tracked; only the data/runtime artifacts and
+# .env (already covered above) are excluded.
+MEETINGS/MEETINGS/uploads/
+MEETINGS/MEETINGS/results/
+MEETINGS/MEETINGS/frames/
+MEETINGS/ASK_COCO/memory/
+
+# Imported standalone prototypes are retained locally for reference. The
+# integrated implementation lives under backend/app and frontend/src.
+ASK_COCO/
+MEETINGS/ASK_COCO/
+MEETINGS/MEETINGS/

@@ -14,8 +14,9 @@ import {
   ShieldCheck,
   ArrowLeft
 } from 'lucide-react';
-import { Meeting, ActionItem, UserProfile } from '../types';
+import { Meeting, ActionItem, UserProfile, GraphData } from '../types';
 import { INITIAL_USER_PROFILE } from '../mock/mockData';
+import { buildLocalMeetingGraph, downloadMeetingReport, getGraphData, toGraphData } from '../services/api';
 import { DecisionGraph } from './DecisionGraph';
 import { StatusBadge } from './StatusBadge';
 import { ActionItemsTable } from './ActionItemsTable';
@@ -45,6 +46,39 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
 
   const [activeTab, setActiveTab] = useState<'decisions' | 'actionItems' | 'transcript' | 'graph'>('decisions');
   const [transcriptSearch, setTranscriptSearch] = useState('');
+  const [meetingGraphData, setMeetingGraphData] = useState<GraphData | undefined>(currentMeeting?.graphData);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportReport = async () => {
+    if (!currentMeeting) return;
+    setIsExporting(true);
+    try {
+      const filename = `${currentMeeting.title.replace(/\s+/g, '_')}_report.md`;
+      await downloadMeetingReport(currentMeeting.id, filename);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Export failed. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!currentMeeting) {
+      setMeetingGraphData(undefined);
+      return;
+    }
+
+    let cancelled = false;
+    setMeetingGraphData(currentMeeting.graphData || buildLocalMeetingGraph(currentMeeting));
+
+    getGraphData(currentMeeting.id).then((backendGraph) => {
+      if (!cancelled && backendGraph) setMeetingGraphData(toGraphData(backendGraph));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentMeeting?.id, currentMeeting?.graphData]);
   
   // Interactive Action Item state per meeting
   const [actionItemsState, setActionItemsState] = useState<ActionItem[]>(
@@ -109,10 +143,11 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
           </div>
 
           <button
-            onClick={() => alert(`Exporting Decision Intelligence Report for "${currentMeeting.title}"...`)}
-            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-700 flex items-center gap-2 transition-colors cursor-pointer"
+            onClick={handleExportReport}
+            disabled={isExporting}
+            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-700 flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Download className="w-4 h-4" /> Export Report
+            <Download className="w-4 h-4" /> {isExporting ? 'Exporting…' : 'Export Report'}
           </button>
         </div>
 
@@ -205,7 +240,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
           }`}
         >
           <BrainCircuit className="w-4 h-4" />
-          <span>Knowledge Graph</span>
+          <span>Memory Graph</span>
         </button>
       </div>
 
@@ -342,7 +377,7 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
             <span className="text-xs text-slate-500">Powered by react-force-graph-2d</span>
           </div>
 
-          <DecisionGraph data={currentMeeting.graphData} meetings={meetings} currentMeetingId={currentMeeting.id} onSendDirectMessage={onSendDirectMessage} />
+          <DecisionGraph data={meetingGraphData} currentMeetingId={currentMeeting.id} onSendDirectMessage={onSendDirectMessage} />
         </div>
       )}
     </div>

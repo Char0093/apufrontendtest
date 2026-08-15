@@ -32,7 +32,7 @@ export const EmployeeDirectoryView: React.FC = () => {
   });
 
   return (
-    <div className="max-w-[1600px] w-full mx-auto px-8 py-6 space-y-6 font-sans animate-fade-in">
+    <div className="max-w-[1920px] w-full mx-auto px-8 py-6 space-y-6 font-sans animate-fade-in">
       
       {/* Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">

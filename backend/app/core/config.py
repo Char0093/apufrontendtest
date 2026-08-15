@@ -6,13 +6,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    gemini_api_key: str
+    gemini_api_key: str = ""
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_username: str = "neo4j"
     neo4j_password: str
     redis_url: str = "redis://localhost:6379/0"
     database_url: str = "sqlite:///./corporate_brain.db"
     storage_path: str = "storage"
+
+    # ASR + LLM intelligence pipeline (Phase 2-4)
+    deepgram_api_key: str = ""
+    agnes_api_key: str = ""
+    agnes_base_url: str = "https://apihub.agnes-ai.com/v1"
+    groq_api_key: str = ""
+    demo_mode: bool = True
+    chroma_path: str = "storage/chroma"
 
 
 @lru_cache

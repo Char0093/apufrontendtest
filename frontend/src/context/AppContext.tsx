@@ -1,17 +1,18 @@
-import React, { createContext, useContext, useState, useMemo } from 'react';
-import { 
-  User, 
+import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
+import {
+  User,
   UserProfile,
-  Employee, 
-  Meeting, 
-  Contradiction, 
-  Notification, 
-  DirectMessage, 
+  Employee,
+  Meeting,
+  Contradiction,
+  Notification,
+  DirectMessage,
   TabType,
   ActionItem,
   Decision
 } from '../types';
 import { INITIAL_USER_PROFILE } from '../mock/mockData';
+import * as api from '../services/api';
 
 // Mock Employees Directory
 const initialEmployees: Employee[] = [
@@ -486,6 +487,7 @@ interface AppContextType {
   meetings: Meeting[];
   contradictions: Contradiction[];
   actionItems: ActionItem[];
+  personalDashboard: api.BackendDashboard | null;
   toggleActionItem: (id: string) => void;
   processAudioForMeeting: (meetingId: string, file: File | { name: string; size?: number }) => void;
   addMeeting: (meetingData: {
@@ -532,10 +534,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [meetings, setMeetings] = useState<Meeting[]>(initialMeetings);
   const [contradictions] = useState<Contradiction[]>(initialContradictions);
   const [actionItems, setActionItems] = useState<ActionItem[]>(initialActionItems);
+  const [personalDashboard, setPersonalDashboard] = useState<api.BackendDashboard | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
   const [directMessages, setDirectMessages] = useState<DirectMessage[]>(initialDirectMessages);
   const [selectedChatUserId, setSelectedChatUserId] = useState<string>('emp-1');
   const [isCreateMeetingOpen, setIsCreateMeetingOpen] = useState<boolean>(false);
+
+  // Load real meetings from the backend (docs/IMPLEMENTATION_PLAN.md Phase 5)
+  // and merge them ahead of the bundled mock data. If the backend isn't
+  // running (e.g. frontend-only dev work, or Task 9.2's live-processing
+  // fallback), this silently no-ops and the app keeps working on mock data.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const items = await api.listMeetings();
+        if (cancelled || items.length === 0) return;
+
+        const loaded = await Promise.all(
+          items.map(async (item) => {
+            const [summary, transcript, graphData] = await Promise.all([
+              api.getMeetingSummary(item.id),
+              api.getMeetingTranscript(item.id),
+              api.getGraphData(item.id),
+            ]);
+            return api.mergeBackendIntoMeeting(
+              { id: item.id, title: item.title, project: item.project || 'Unassigned' },
+              item,
+              summary,
+              transcript,
+              graphData
+            );
+          })
+        );
+
+        if (!cancelled) {
+          setMeetings((prev) => [...loaded, ...prev.filter((m) => !loaded.some((l) => l.id === m.id))]);
+        }
+      } catch (e) {
+        console.warn('[Corporate Brain] Backend not reachable, staying on demo data:', e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    api.getUserDashboard(currentUser.name)
+      .then((dashboard) => {
+        if (!cancelled) setPersonalDashboard(dashboard);
+      })
+      .catch(() => {
+        if (!cancelled) setPersonalDashboard(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser.name]);
 
   const unreadCount = useMemo(() => {
     return notifications.filter(n => !n.read).length;
@@ -633,6 +695,132 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const processAudioForMeeting = (meetingId: string, file: File | { name: string; size?: number }) => {
     setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, status: 'Preprocessing' as any } : m));
 
+    if (!(file instanceof File)) {
+      simulateAudioProcessing(meetingId, file);
+      return;
+    }
+
+    const targetMtg = meetings.find(m => m.id === meetingId);
+    const mtgTitle = targetMtg?.title || 'Meeting Sync';
+
+    (async () => {
+      try {
+        const { meeting_id: backendId } = await api.uploadMeeting(file, mtgTitle, targetMtg?.project);
+
+        setMeetings(prev => prev.map(m => m.id === meetingId
+          ? { ...m, audioFileName: file.name, fileSize: `${(file.size / (1024 * 1024)).toFixed(1)} MB` }
+          : m));
+
+        let hasNotifiedRetry = false;
+
+        const poll = async (): Promise<void> => {
+          const taskStatus = await api.getTaskStatus(backendId);
+          const listItem: api.BackendMeetingListItem = {
+            id: backendId,
+            title: mtgTitle,
+            project: targetMtg?.project || null,
+            date: null,
+            status: taskStatus.status,
+            progress: taskStatus.progress_percentage,
+            decisions_count: 0,
+            action_items_count: 0,
+            flags_count: 0,
+          };
+
+          if (taskStatus.status === 'completed') {
+            const [summary, transcript, graphData] = await Promise.all([
+              api.getMeetingSummary(backendId),
+              api.getMeetingTranscript(backendId),
+              api.getGraphData(backendId),
+            ]);
+
+            setMeetings(prev => prev.map(m => {
+              if (m.id !== meetingId) return m;
+              const merged = api.mergeBackendIntoMeeting(m, listItem, summary, transcript, graphData);
+              // The AI-extracted participant list won't necessarily include
+              // whoever triggered this upload (e.g. DEMO_MODE always returns
+              // the same canned names) — without this, a real upload could
+              // silently vanish from the "my meetings" personalized views
+              // (MeetingIntelligenceView/DashboardView filter on participant
+              // name), which is confusing during a live demo.
+              const alreadyListed = merged.participants.some(
+                p => p.toLowerCase() === currentUser.name.toLowerCase()
+              );
+              return alreadyListed
+                ? merged
+                : { ...merged, participants: [...merged.participants, currentUser.name] };
+            }));
+
+            setNotifications(prev => [
+              {
+                id: `notif-asr-${Date.now()}`,
+                title: 'AI Analysis Ready ✨',
+                message: `Transcript, Decisions, and Action Items for "${mtgTitle}" are now live.`,
+                timestamp: 'Just now',
+                read: false,
+                category: 'ai_pipeline',
+                type: 'AI_READY',
+                meetingId,
+                targetTab: 'meetings'
+              },
+              ...prev
+            ]);
+          } else if (taskStatus.status === 'failed') {
+            setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, status: 'Failed' as any } : m));
+            setNotifications(prev => [
+              {
+                id: `notif-fail-${Date.now()}`,
+                title: 'AI Analysis Failed',
+                message: `Processing "${mtgTitle}" failed: ${taskStatus.error_message || 'unknown error'}.`,
+                timestamp: 'Just now',
+                read: false,
+                category: 'ai_pipeline',
+                type: 'SYSTEM_ALERT',
+                meetingId,
+                targetTab: 'meetings'
+              },
+              ...prev
+            ]);
+          } else {
+            setMeetings(prev => prev.map(m => m.id === meetingId
+              ? { ...m, status: api.mapBackendStatus(taskStatus.status, taskStatus.progress_percentage) as any }
+              : m));
+
+            if (taskStatus.status === 'retrying' && !hasNotifiedRetry) {
+              hasNotifiedRetry = true;
+              setNotifications(prev => [
+                {
+                  id: `notif-retry-${Date.now()}`,
+                  title: 'Retrying After a Processing Error',
+                  message: `"${mtgTitle}" hit an error and is being retried automatically: ${taskStatus.error_message || 'unknown error'}.`,
+                  timestamp: 'Just now',
+                  read: false,
+                  category: 'ai_pipeline',
+                  type: 'SYSTEM_ALERT',
+                  meetingId,
+                  targetTab: 'meetings'
+                },
+                ...prev
+              ]);
+            }
+
+            setTimeout(poll, 2000);
+          }
+        };
+
+        setTimeout(poll, 1500);
+      } catch (e) {
+        console.warn('[Corporate Brain] Real upload failed (is the backend running?), falling back to local demo simulation:', e);
+        simulateAudioProcessing(meetingId, file);
+      }
+    })();
+  };
+
+  /** Client-side fake pipeline — used for non-File placeholders (no real
+   * bytes to upload) or when the real upload above fails, so the demo still
+   * works with the backend unreachable (Task 9.2's live-processing
+   * fallback). */
+  const simulateAudioProcessing = (meetingId: string, file: File | { name: string; size?: number }) => {
     setTimeout(() => {
       const targetMtg = meetings.find(m => m.id === meetingId);
       const mtgTitle = targetMtg?.title || 'Meeting Sync';
@@ -903,6 +1091,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         meetings,
         contradictions,
         actionItems,
+        personalDashboard,
         toggleActionItem,
         processAudioForMeeting,
         addMeeting,

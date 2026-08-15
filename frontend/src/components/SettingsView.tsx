@@ -16,7 +16,10 @@ import {
   Mail,
   Phone,
   ShieldCheck,
-  Palette
+  Palette,
+  Chrome,
+  Video,
+  Clock
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -78,7 +81,7 @@ export const SettingsView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-[1600px] w-full mx-auto px-8 py-6 space-y-6 font-sans animate-fade-in pb-16">
+    <div className="max-w-[1920px] w-full mx-auto px-8 py-6 space-y-6 font-sans animate-fade-in pb-16">
       
       {/* Toast Notification Alert */}
       {showToast && (
@@ -354,6 +357,77 @@ export const SettingsView: React.FC = () => {
                   onChange={(e) => setPhone(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-colors"
                 />
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Section 3: Integrations & Roadmap Card (Task 6.9) */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-5">
+          <div className="flex items-center space-x-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-100 dark:border-indigo-900">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-extrabold text-slate-900 dark:text-white font-sans">
+                Integrations & Roadmap
+              </h2>
+              <p className="text-[11px] text-slate-400">
+                What's next for Corporate Brain — visible now, not yet enabled.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+            {/* Google OAuth Login */}
+            <div className="p-4 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30 flex items-start space-x-3.5 opacity-80">
+              <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 flex items-center justify-center shrink-0">
+                <Chrome className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-slate-900 dark:text-white">Google OAuth Login</div>
+                  <span className="shrink-0 px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center gap-1">
+                    <Clock className="w-2.5 h-2.5" /> Coming Soon
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Sign in with your corporate Google Workspace account instead of a demo profile.
+                </p>
+                <button
+                  type="button"
+                  disabled
+                  className="mt-3 px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] font-bold cursor-not-allowed"
+                >
+                  Connect Google Account
+                </button>
+              </div>
+            </div>
+
+            {/* Live Meeting Rooms */}
+            <div className="p-4 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30 flex items-start space-x-3.5 opacity-80">
+              <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 flex items-center justify-center shrink-0">
+                <Video className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-slate-900 dark:text-white">Live Meeting Rooms</div>
+                  <span className="shrink-0 px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center gap-1">
+                    <Clock className="w-2.5 h-2.5" /> Coming Soon
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Coco joins your meetings live — real-time transcription and decision capture as you talk.
+                </p>
+                <button
+                  type="button"
+                  disabled
+                  className="mt-3 px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] font-bold cursor-not-allowed"
+                >
+                  Enable Live Rooms
+                </button>
               </div>
             </div>
 
