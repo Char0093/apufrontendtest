@@ -13,6 +13,7 @@ export type TabType =
   | 'dashboard'
   | 'meetings'
   | 'memoryGraph'
+  | 'live-meeting'
   | 'directory'
   | 'messages'
   | 'coco'

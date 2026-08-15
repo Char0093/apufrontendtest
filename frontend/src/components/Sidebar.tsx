@@ -44,6 +44,13 @@ export const Sidebar: React.FC = () => {
       icon: <Share2 className="w-5 h-5" />
     },
     {
+      id: 'live-meeting',
+      label: 'Live Meeting',
+      icon: <Video className="w-5 h-5" />,
+      badge: 'LIVE',
+      badgeColor: 'bg-emerald-100 text-emerald-700 font-bold'
+    },
+    {
       id: 'directory',
       label: 'Directory',
       icon: <Users className="w-5 h-5" />

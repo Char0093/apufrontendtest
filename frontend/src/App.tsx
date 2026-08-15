@@ -13,6 +13,7 @@ import { EmployeeDirectoryView } from './components/EmployeeDirectoryView';
 import { DirectMessagingView } from './components/DirectMessagingView';
 import { CocoChatView } from './components/CocoChatView';
 import { SettingsView } from './components/SettingsView';
+import { MeetingRoomView } from './components/MeetingRoomView';
 
 const MainAppContent: React.FC = () => {
   const { isLoggedIn, activeTab } = useApp();
@@ -35,6 +36,11 @@ const MainAppContent: React.FC = () => {
           {activeTab === 'dashboard' && <DashboardView />}
           {activeTab === 'meetings' && <MeetingIntelligenceView />}
           {activeTab === 'memoryGraph' && <MemoryGraphView />}
+          {/* Keep the room mounted so sidebar navigation does not disconnect
+              media, participants, or the in-memory whiteboard. */}
+          <div className={activeTab === 'live-meeting' ? 'block' : 'hidden'}>
+            <MeetingRoomView />
+          </div>
           {activeTab === 'directory' && <EmployeeDirectoryView />}
           {activeTab === 'coco' && <CocoChatView />}
           {activeTab === 'settings' && <SettingsView />}
