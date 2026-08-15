@@ -14,6 +14,18 @@ import {
 import { INITIAL_USER_PROFILE } from '../mock/mockData';
 import * as api from '../services/api';
 
+/** AI-extracted participants reflect who was actually heard in the
+ * recording, not necessarily whoever is logged in — without this, a fully
+ * processed meeting silently disappears from every "my meetings" view
+ * (Dashboard, Meeting Intelligence) whenever the demo user wasn't a real
+ * attendee. Used both on initial load and right after live upload. */
+function ensureCurrentUserIsParticipant(meeting: Meeting, currentUserName: string): Meeting {
+  const alreadyListed = meeting.participants.some(
+    (p) => p.toLowerCase() === currentUserName.toLowerCase()
+  );
+  return alreadyListed ? meeting : { ...meeting, participants: [...meeting.participants, currentUserName] };
+}
+
 // Mock Employees Directory
 const initialEmployees: Employee[] = [
   {
@@ -552,7 +564,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const items = await api.listMeetings();
         if (cancelled || items.length === 0) return;
 
-        const loaded = await Promise.all(
+        // Promise.all rejects (and discards every already-fetched meeting)
+        // the moment a single item throws — one meeting with an unexpected
+        // real-mode extraction shape used to silently blank out the entire
+        // list, including previously-working ones. allSettled means one bad
+        // meeting is skipped (and logged) instead of taking the rest down.
+        const results = await Promise.allSettled(
           items.map(async (item) => {
             const [summary, transcript, graphData] = await Promise.all([
               api.getMeetingSummary(item.id),
@@ -569,7 +586,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           })
         );
 
-        if (!cancelled) {
+        const loaded: Meeting[] = [];
+        results.forEach((result, i) => {
+          if (result.status === 'fulfilled') {
+            // AI-extracted participants are whoever the model actually heard
+            // in the recording — for a real upload that's real names, not
+            // necessarily the demo's currentUser. Without this, any meeting
+            // where currentUser wasn't personally on the call is invisible
+            // in every "my meetings" personalized view (Dashboard, Meeting
+            // Intelligence both filter on participant name) from the very
+            // first page load, even though it's genuinely fully processed.
+            loaded.push(ensureCurrentUserIsParticipant(result.value, currentUser.name));
+          } else {
+            console.error(`[Corporate Brain] Failed to load meeting ${items[i].id} ("${items[i].title}"):`, result.reason);
+          }
+        });
+
+        if (!cancelled && loaded.length > 0) {
           setMeetings((prev) => [...loaded, ...prev.filter((m) => !loaded.some((l) => l.id === m.id))]);
         }
       } catch (e) {
@@ -737,18 +770,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setMeetings(prev => prev.map(m => {
               if (m.id !== meetingId) return m;
               const merged = api.mergeBackendIntoMeeting(m, listItem, summary, transcript, graphData);
-              // The AI-extracted participant list won't necessarily include
-              // whoever triggered this upload (e.g. DEMO_MODE always returns
-              // the same canned names) — without this, a real upload could
-              // silently vanish from the "my meetings" personalized views
-              // (MeetingIntelligenceView/DashboardView filter on participant
-              // name), which is confusing during a live demo.
-              const alreadyListed = merged.participants.some(
-                p => p.toLowerCase() === currentUser.name.toLowerCase()
-              );
-              return alreadyListed
-                ? merged
-                : { ...merged, participants: [...merged.participants, currentUser.name] };
+              return ensureCurrentUserIsParticipant(merged, currentUser.name);
             }));
 
             setNotifications(prev => [
