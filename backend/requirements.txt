@@ -7,3 +7,4 @@ celery==5.6.3
 redis==8.1.0
 sqlalchemy==2.0.51
 python-multipart==0.0.32
+livekit-api>=1.0,<2.0

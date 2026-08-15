@@ -10,6 +10,7 @@ export type ProcessingStatus =
 export type TabType = 
   | 'dashboard'
   | 'meetings'
+  | 'live-meeting'
   | 'directory'
   | 'messages'
   | 'coco'

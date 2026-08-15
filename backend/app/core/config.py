@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     database_url: str = "sqlite:///./corporate_brain.db"
     storage_path: str = "storage"
+    # These defaults match `livekit-server --dev` only.  Use distinct values
+    # in every non-development environment.
+    livekit_url: str = "ws://localhost:7880"
+    livekit_api_key: str = "devkey"
+    livekit_api_secret: str = "secret"
 
 
 @lru_cache
