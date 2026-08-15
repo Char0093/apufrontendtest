@@ -5,8 +5,9 @@ The browser receives only the signed JWT, never the LiveKit API secret.
 
 import re
 import uuid
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
@@ -33,7 +34,7 @@ class LiveKitTokenResponse(BaseModel):
 
 
 @router.post("/token", response_model=LiveKitTokenResponse)
-def create_livekit_token(payload: LiveKitTokenRequest) -> LiveKitTokenResponse:
+def create_livekit_token(payload: LiveKitTokenRequest, request: Request) -> LiveKitTokenResponse:
     """Issue a participant-scoped token for one meeting room."""
     if livekit_api is None:
         raise HTTPException(status_code=503, detail="LiveKit support is not installed on the API server")
@@ -64,4 +65,16 @@ def create_livekit_token(payload: LiveKitTokenRequest) -> LiveKitTokenResponse:
         )
         .to_jwt()
     )
-    return LiveKitTokenResponse(token=token, server_url=settings.livekit_url, identity=identity)
+    server_url = settings.livekit_url
+    parsed_livekit_url = urlsplit(server_url)
+    request_host = request.url.hostname
+    # The localhost default is convenient on the host but wrong for guests:
+    # their browser would try to connect to LiveKit on their own computer.
+    # Preserve explicitly configured public/LAN URLs, and only derive a host
+    # from the incoming request while using the local development default.
+    if parsed_livekit_url.hostname in {"localhost", "127.0.0.1"} and request_host:
+        safe_host = f"[{request_host}]" if ":" in request_host else request_host
+        scheme = "wss" if request.url.scheme == "https" else "ws"
+        server_url = f"{scheme}://{safe_host}:{parsed_livekit_url.port or 7880}"
+
+    return LiveKitTokenResponse(token=token, server_url=server_url, identity=identity)

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-client = TestClient(app, raise_server_exceptions=False)
+client = TestClient(app, base_url="http://localhost", raise_server_exceptions=False)
 
 
 @contextmanager
@@ -55,9 +55,25 @@ def test_livekit_token_rejects_unsafe_room_id():
     assert response.status_code == 422
 
 
+def test_livekit_token_uses_request_host_for_lan_development():
+    response = client.post(
+        "/livekit/token",
+        headers={"Host": "192.168.1.20:8000"},
+        json={"room_name": "lan-room", "display_name": "LAN Guest"},
+    )
+    assert response.status_code == 200
+    assert response.json()["server_url"] == "ws://192.168.1.20:7880"
+
+
 def test_cors_headers_present_for_allowed_origin():
     response = client.get("/health", headers={"Origin": "http://localhost:5173"})
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_cors_headers_present_for_private_lan_origin():
+    origin = "http://192.168.1.20:5173"
+    response = client.get("/health", headers={"Origin": origin})
+    assert response.headers["access-control-allow-origin"] == origin
 
 
 def test_request_logging_records_status_and_path(caplog):

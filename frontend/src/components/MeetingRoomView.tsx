@@ -25,7 +25,11 @@ import { MeetingRecorder } from './MeetingRecorder';
 
 type JoinDetails = { token: string; serverUrl: string; roomName: string; displayName: string };
 
-const apiBaseUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+// With no explicit deployment URL, use the same machine that served Vite.
+// This makes a LAN URL such as http://192.168.1.20:5173 call that host's API
+// instead of incorrectly calling localhost on the guest's computer.
+const apiBaseUrl = import.meta.env.VITE_API_URL
+  ?? `${window.location.protocol}//${window.location.hostname}:8000`;
 
 async function getJoinDetails(roomName: string, displayName: string): Promise<JoinDetails> {
   const response = await fetch(`${apiBaseUrl}/livekit/token`, {
