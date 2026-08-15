@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
-  const { currentUser, updateCurrentUser } = useApp();
+  const { currentUser, updateCurrentUser, setActiveTab } = useApp();
 
   // Local form state
   const [name, setName] = useState(currentUser.name || 'Alex Mercer');
@@ -407,26 +407,26 @@ export const SettingsView: React.FC = () => {
             </div>
 
             {/* Live Meeting Rooms */}
-            <div className="p-4 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30 flex items-start space-x-3.5 opacity-80">
-              <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 flex items-center justify-center shrink-0">
+            <div className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/40 dark:bg-emerald-950/20 flex items-start space-x-3.5">
+              <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-900 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
                 <Video className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-xs font-bold text-slate-900 dark:text-white">Live Meeting Rooms</div>
-                  <span className="shrink-0 px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center gap-1">
-                    <Clock className="w-2.5 h-2.5" /> Coming Soon
+                  <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+                    Live
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Coco joins your meetings live — real-time transcription and decision capture as you talk.
+                  Join a real-time video room with a shared whiteboard and recording — available now from the "Live Meeting" tab.
                 </p>
                 <button
                   type="button"
-                  disabled
-                  className="mt-3 px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] font-bold cursor-not-allowed"
+                  onClick={() => setActiveTab('live-meeting')}
+                  className="mt-3 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
                 >
-                  Enable Live Rooms
+                  Open Live Meeting
                 </button>
               </div>
             </div>
