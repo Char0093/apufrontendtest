@@ -1,7 +1,8 @@
 """Contradiction detection (Task 4.4, real path): embed each new decision,
-find similar past decisions from OTHER meetings via ChromaDB, then ask
-Gemini to judge whether they actually conflict (not just topically similar).
-On a real contradiction, returns a Flag for the Phase 5.3 summary response.
+find similar past decisions from OTHER meetings via ChromaDB, then ask a
+judge whether they actually conflict (not just topically similar). On a
+real contradiction, returns a Flag for the Phase 5.3 summary response —
+and, since 2026-08-15, for live in-call suggestions too (check_text()).
 
 This module only detects — it does not write to Neo4j. The CONTRADICTS edge
 needs both Decision nodes to already exist, and this meeting's own decision
@@ -25,11 +26,36 @@ settings = get_settings()
 # apart than this are treated as unrelated and never sent to the judge call.
 _SIMILARITY_DISTANCE_THRESHOLD = 0.6
 
+# Demo-safe fallback judge (Task 4.4's original "Demo path", re-enabled for
+# the case neither Gemini nor Agnes is configured — the LLM judge below
+# fails closed to None in that case, which would make live suggestions
+# silently never fire in a keyless demo). Each pair is checked both ways.
+_OPPOSING_TERM_PAIRS = (
+    ("approve", "reject"), ("approved", "rejected"), ("increase", "freeze"),
+    ("increase", "halt"), ("proceed", "halt"), ("proceed", "pause"),
+    ("hire", "layoff"), ("hire", "freeze"), ("expand", "cut"),
+    ("continue", "cancel"), ("renew", "terminate"),
+)
 
-def _judge_contradiction(new_text: str, past_text: str) -> Optional[str]:
-    """Ask Gemini/Agnes whether two similar decisions actually contradict.
-    Returns a short reason if they do, None if they don't or the call fails
-    (fail closed — no flag rather than a fabricated one)."""
+
+def _keyword_fallback_judge(new_text: str, past_text: str) -> Optional[str]:
+    new_lower, past_lower = new_text.lower(), past_text.lower()
+    for term_a, term_b in _OPPOSING_TERM_PAIRS:
+        if (term_a in new_lower and term_b in past_lower) or (term_b in new_lower and term_a in past_lower):
+            return f'Pattern-matched opposing terms ("{term_a}" vs "{term_b}") — not an AI-verified judgment.'
+    return None
+
+
+def _judge_contradiction(new_text: str, past_text: str) -> Optional[tuple[str, str]]:
+    """Ask an LLM whether two similar decisions actually contradict; falls
+    back to a deterministic keyword judge when no LLM key is configured at
+    all (not just when a call happens to fail). Returns (reason, judge) —
+    judge is "llm" or "keyword_fallback" — or None if no contradiction is
+    found either way."""
+    if not settings.gemini_api_key and not settings.agnes_api_key:
+        reason = _keyword_fallback_judge(new_text, past_text)
+        return (reason, "keyword_fallback") if reason else None
+
     prompt = f"""Two organizational decisions, possibly from different meetings:
 
 Decision A (new): "{new_text}"
@@ -43,6 +69,7 @@ similar topic? Return ONLY JSON: {{"contradicts": true/false, "reason": "one sen
         raw = ""
         if settings.gemini_api_key:
             from google import genai
+
             client = genai.Client(api_key=settings.gemini_api_key)
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
@@ -61,11 +88,39 @@ similar topic? Return ONLY JSON: {{"contradicts": true/false, "reason": "one sen
             raw = "\n".join(raw.split("\n")[1:-1])
         data = json.loads(raw)
         if data.get("contradicts"):
-            return data.get("reason", "Flagged as a likely contradiction.")
+            return data.get("reason", "Flagged as a likely contradiction."), "llm"
         return None
     except Exception as e:
         logger.warning(f"Contradiction judge call failed: {e}")
         return None
+
+
+def check_text(text: str, exclude_meeting_id: str) -> Optional[Flag]:
+    """Embed `text`, find similar past decisions from other meetings, ask
+    the judge whether they genuinely conflict. Returns a Flag on a real
+    contradiction, None otherwise (including on any failure — fails closed).
+    Used both by check_decisions() below (post-call) and live_meeting.py
+    (during a call)."""
+    matches = embedding_service.query_similar_decisions(text, exclude_meeting_id=exclude_meeting_id, n_results=3)
+    for match in matches:
+        if match["distance"] > _SIMILARITY_DISTANCE_THRESHOLD:
+            continue
+
+        judged = _judge_contradiction(text, match["text"])
+        if not judged:
+            continue
+        reason, judge = judged
+
+        return Flag(
+            type=FlagType.contradiction,
+            message=reason,
+            severity="warning",
+            source_decision_text=text,
+            contradicts_meeting_id=match["meeting_id"],
+            contradicts_decision_text=match["text"],
+            judge=judge,
+        )
+    return None
 
 
 def check_decisions(meeting_id: str, decisions: list[Decision]) -> list[Flag]:
@@ -74,28 +129,9 @@ def check_decisions(meeting_id: str, decisions: list[Decision]) -> list[Flag]:
     via embedding_service.index_meeting for prior meetings). Returns any
     Flags found; does not mutate the input list."""
     flags: list[Flag] = []
-
     for decision in decisions:
-        matches = embedding_service.query_similar_decisions(
-            decision.text, exclude_meeting_id=meeting_id, n_results=3
-        )
-        for match in matches:
-            if match["distance"] > _SIMILARITY_DISTANCE_THRESHOLD:
-                continue
-
-            reason = _judge_contradiction(decision.text, match["text"])
-            if not reason:
-                continue
-
-            flags.append(Flag(
-                type=FlagType.contradiction,
-                message=reason,
-                severity="warning",
-                source_decision_text=decision.text,
-                contradicts_meeting_id=match["meeting_id"],
-                contradicts_decision_text=match["text"],
-            ))
-            logger.info(f"[{meeting_id}] Contradiction flagged against {match['meeting_id']}: {reason}")
-            break  # one flag per new decision is enough for the demo
-
+        flag = check_text(decision.text, exclude_meeting_id=meeting_id)
+        if flag is not None:
+            flags.append(flag)
+            logger.info(f"[{meeting_id}] Contradiction flagged against {flag.contradicts_meeting_id}: {flag.message}")
     return flags

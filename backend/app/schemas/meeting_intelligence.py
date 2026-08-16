@@ -70,6 +70,7 @@ class Flag(BaseModel):
     source_decision_text: Optional[str] = None
     contradicts_meeting_id: Optional[str] = None
     contradicts_decision_text: Optional[str] = None
+    judge: str = "llm"
 
 
 class KnowledgeTriple(BaseModel):
