@@ -18,7 +18,7 @@ _DEEPGRAM_URL = (
     "wss://api.deepgram.com/v1/listen"
     "?model=nova-2&smart_format=true&interim_results=true&punctuate=true&language=en"
 )
-_KEEPALIVE_INTERVAL_SECONDS = 8
+_KEEPALIVE_INTERVAL_SECONDS = 5
 
 
 class DeepgramLiveConnection:
