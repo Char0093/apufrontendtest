@@ -35,16 +35,33 @@ type JoinDetails = { token: string; serverUrl: string; roomName: string; display
 // With no explicit deployment URL, use the same machine that served Vite.
 // This makes a LAN URL such as http://192.168.1.20:5173 call that host's API
 // instead of incorrectly calling localhost on the guest's computer.
+// Vite can be opened on IPv6 loopback while FastAPI is bound to IPv4 during
+// local development, so route that one local-only case to the IPv4 loopback.
+const frontendHost = window.location.hostname;
+const apiHost = frontendHost === '::1' || frontendHost === '[::1]'
+  ? '127.0.0.1'
+  : frontendHost;
 const apiBaseUrl = import.meta.env.VITE_API_URL
-  ?? `${window.location.protocol}//${window.location.hostname}:8000`;
+  ?? `${window.location.protocol}//${apiHost}:8000`;
 
 async function getJoinDetails(roomName: string, displayName: string): Promise<JoinDetails> {
-  const response = await fetch(`${apiBaseUrl}/livekit/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ room_name: roomName, display_name: displayName }),
-  });
-  const payload = await response.json() as { token?: string; server_url?: string; detail?: string };
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}/livekit/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_name: roomName, display_name: displayName }),
+    });
+  } catch {
+    throw new Error(`Cannot reach the meeting server at ${apiBaseUrl}. Start FastAPI on port 8000, then try again.`);
+  }
+
+  let payload: { token?: string; server_url?: string; detail?: string } = {};
+  try {
+    payload = await response.json() as typeof payload;
+  } catch {
+    if (!response.ok) throw new Error(`Meeting server returned ${response.status}. Check that FastAPI is running correctly.`);
+  }
   if (!response.ok || !payload.token || !payload.server_url) {
     throw new Error(payload.detail ?? 'Unable to create a secure room token.');
   }

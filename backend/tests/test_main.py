@@ -70,6 +70,12 @@ def test_cors_headers_present_for_allowed_origin():
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
 
 
+def test_cors_headers_present_for_ipv6_loopback_origin():
+    origin = "http://[::1]:5173"
+    response = client.get("/health", headers={"Origin": origin})
+    assert response.headers["access-control-allow-origin"] == origin
+
+
 def test_cors_headers_present_for_private_lan_origin():
     origin = "http://192.168.1.20:5173"
     response = client.get("/health", headers={"Origin": origin})
