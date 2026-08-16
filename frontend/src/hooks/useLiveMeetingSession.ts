@@ -57,10 +57,23 @@ export function useLiveMeetingSession(roomName: string, token: string): LiveMeet
   // Session WS: opens once on room join, independent of the caption toggle.
   useEffect(() => {
     if (!token) return;
+    // React StrictMode deliberately mounts every effect twice in dev
+    // (mount -> cleanup -> mount again) to surface missing cleanup bugs.
+    // The first WebSocket instance gets closed by that cleanup before it
+    // ever opens, firing onerror/onclose for a connection that was never
+    // really broken. Clearing any stale error here, at the start of each
+    // new attempt, means a torn-down previous instance can never leave a
+    // permanent error banner in front of a second instance that connects
+    // fine — this isn't a StrictMode-only concern, the same reasoning
+    // applies to any future reconnect attempt too.
+    setConnectionError('');
     const ws = new WebSocket(`${wsBaseUrl}/live-meeting/${roomName}/session`);
     wsRef.current = ws;
 
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', token }));
+    ws.onopen = () => {
+      setConnectionError('');
+      ws.send(JSON.stringify({ type: 'auth', token }));
+    };
 
     ws.onmessage = (event) => {
       const payload = JSON.parse(event.data as string);
