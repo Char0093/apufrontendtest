@@ -28,6 +28,19 @@ class StorageService:
         (self.base_path / relative_path).write_text(json.dumps(data, indent=2))
         return relative_path
 
+    def save_live_segments(self, meeting_id: str, segments: list[dict]) -> str:
+        """Raw segments captured live, before Gemini extraction — read back
+        by process_live_meeting_task. Lives under raw/ alongside uploaded
+        files: both are "the raw input for this meeting", just a different
+        format when there's no uploaded file at all."""
+        relative_path = f"raw/{meeting_id}_live.json"
+        (self.base_path / relative_path).write_text(json.dumps(segments, indent=2))
+        return relative_path
+
+    def get_live_segments(self, meeting_id: str) -> list[dict]:
+        relative_path = f"raw/{meeting_id}_live.json"
+        return json.loads((self.base_path / relative_path).read_text())
+
     def save_summary(self, meeting_id: str, data: dict) -> str:
         relative_path = f"summaries/{meeting_id}.json"
         (self.base_path / relative_path).write_text(json.dumps(data, indent=2))

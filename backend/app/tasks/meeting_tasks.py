@@ -32,34 +32,25 @@ def _get_or_create_task_record(db, meeting_id: str) -> ProcessingTask:
     return task_record
 
 
-def _run_pipeline(meeting: Meeting, on_progress) -> MeetingIntelligence:
-    """Runs the Phase 2-4 pipeline for one meeting (ASR -> Vision -> Gemini
-    -> contradiction detection). Raises on failure; process_meeting_task owns
-    all DB status/retry handling. Does not write to Neo4j — that happens in
-    _save_and_graph, after this returns, because CONTRADICTS edges need this
-    meeting's own Decision nodes to exist first."""
-    if settings.demo_mode:
-        on_progress(20, "Running demo pipeline (DEMO_MODE=true, no API calls)...")
-        graph_builder.seed_demo_history()
-        intelligence = gemini_service.demo_meeting_intelligence(meeting.id)
-        on_progress(90, "Demo data ready")
-        return intelligence
-
-    raw_path = str((storage.base_path / meeting.file_path).resolve())
-    audio_path = str(storage.base_path / "audio" / f"{meeting.id}.wav")
-
-    on_progress(15, "Extracting audio...")
-    audio_path = asr_service.extract_audio(raw_path, audio_path)
-
-    on_progress(30, "Transcribing with Deepgram...")
-    segments = asr_service.run_deepgram_transcription(audio_path)
+def _analyze_transcript(
+    meeting: Meeting,
+    segments: list[dict],
+    on_progress,
+    name_timestamps: dict | None = None,
+    all_detected_names: list[str] | None = None,
+) -> MeetingIntelligence:
+    """Gemini extraction through contradiction detection — the part of the
+    pipeline that's identical whether segments came from a Deepgram REST
+    transcription of an uploaded file, or from a live call
+    (app/api/live_meeting.py). No demo_mode branch here on purpose: that's
+    _run_pipeline's job below, for the "no file at all" case — a live
+    session always has real segments, so it always runs for real, relying
+    on gemini_service's own multi-provider fallback chain for resilience
+    rather than substituting unrelated canned data over a real conversation.
+    """
+    name_timestamps = name_timestamps or {}
+    all_detected_names = all_detected_names or []
     transcript_text = "\n".join(f"[{s['timestamp']}] {s['speaker']}: {s['text']}" for s in segments)
-
-    name_timestamps: dict = {}
-    if Path(raw_path).suffix.lower() in _VIDEO_EXTENSIONS:
-        on_progress(45, "Reading participant names from video (Vision)...")
-        name_timestamps = vision_service.extract_names_from_video(raw_path)
-    all_detected_names = list({n for names in name_timestamps.values() for n in names})
 
     on_progress(60, "Extracting decisions and action items (Gemini)...")
     analysis_dict = gemini_service.run_gemini_analysis(transcript_text, all_detected_names)
@@ -104,6 +95,35 @@ def _run_pipeline(meeting: Meeting, on_progress) -> MeetingIntelligence:
     return intelligence
 
 
+def _run_pipeline(meeting: Meeting, on_progress) -> MeetingIntelligence:
+    """Runs the Phase 2-4 pipeline for one uploaded-file meeting (ASR ->
+    Vision -> _analyze_transcript). Raises on failure; _process_meeting owns
+    all DB status/retry handling."""
+    if settings.demo_mode:
+        on_progress(20, "Running demo pipeline (DEMO_MODE=true, no API calls)...")
+        graph_builder.seed_demo_history()
+        intelligence = gemini_service.demo_meeting_intelligence(meeting.id)
+        on_progress(90, "Demo data ready")
+        return intelligence
+
+    raw_path = str((storage.base_path / meeting.file_path).resolve())
+    audio_path = str(storage.base_path / "audio" / f"{meeting.id}.wav")
+
+    on_progress(15, "Extracting audio...")
+    audio_path = asr_service.extract_audio(raw_path, audio_path)
+
+    on_progress(30, "Transcribing with Deepgram...")
+    segments = asr_service.run_deepgram_transcription(audio_path)
+
+    name_timestamps: dict = {}
+    if Path(raw_path).suffix.lower() in _VIDEO_EXTENSIONS:
+        on_progress(45, "Reading participant names from video (Vision)...")
+        name_timestamps = vision_service.extract_names_from_video(raw_path)
+    all_detected_names = list({n for names in name_timestamps.values() for n in names})
+
+    return _analyze_transcript(meeting, segments, on_progress, name_timestamps, all_detected_names)
+
+
 def _save_and_graph(meeting: Meeting, intelligence: MeetingIntelligence) -> None:
     """Persist transcript/summary (StorageService, Task 1.1) and build the
     graph (Task 4.3), then write any CONTRADICTS edges (Task 4.4) now that
@@ -132,9 +152,11 @@ def _save_and_graph(meeting: Meeting, intelligence: MeetingIntelligence) -> None
             graph_builder.write_contradiction(from_id, to_id, flag.message)
 
 
-@celery_app.task(bind=True, name="process_meeting_task", max_retries=2)
-def process_meeting_task(self, meeting_id: str) -> None:
-    logger.info(f"Processing meeting {meeting_id} (attempt {self.request.retries + 1})")
+def _process_meeting(task, meeting_id: str, run_pipeline) -> None:
+    """Generic status/retry shell shared by process_meeting_task and
+    process_live_meeting_task below — the only thing that differs between
+    an upload and a live call is how MeetingIntelligence gets produced."""
+    logger.info(f"Processing meeting {meeting_id} (attempt {task.request.retries + 1})")
     db = SessionLocal()
     try:
         meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
@@ -144,7 +166,7 @@ def process_meeting_task(self, meeting_id: str) -> None:
 
         task_record = _get_or_create_task_record(db, meeting_id)
         task_record.status = "processing"
-        task_record.retry_count = self.request.retries
+        task_record.retry_count = task.request.retries
         meeting.status = "processing"
         meeting.progress = 5
         db.commit()
@@ -154,7 +176,7 @@ def process_meeting_task(self, meeting_id: str) -> None:
             db.commit()
             logger.info(f"[{meeting_id}] {pct}% — {message}")
 
-        intelligence = _run_pipeline(meeting, on_progress)
+        intelligence = run_pipeline(meeting, on_progress)
         _save_and_graph(meeting, intelligence)
 
         task_record.status = "completed"
@@ -173,17 +195,36 @@ def process_meeting_task(self, meeting_id: str) -> None:
         meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
         task_record = _get_or_create_task_record(db, meeting_id)
         task_record.error_message = str(exc)
-        task_record.retry_count = self.request.retries
+        task_record.retry_count = task.request.retries
 
-        is_final_attempt = self.request.retries >= self.max_retries
+        is_final_attempt = task.request.retries >= task.max_retries
         task_record.status = "failed" if is_final_attempt else "retrying"
         if meeting is not None:
             meeting.status = "failed" if is_final_attempt else "retrying"
         db.commit()
 
         if is_final_attempt:
-            logger.error(f"Meeting {meeting_id} failed after {self.request.retries + 1} attempts")
+            logger.error(f"Meeting {meeting_id} failed after {task.request.retries + 1} attempts")
         else:
-            raise self.retry(exc=exc, countdown=2**self.request.retries)
+            raise task.retry(exc=exc, countdown=2**task.request.retries)
     finally:
         db.close()
+
+
+@celery_app.task(bind=True, name="process_meeting_task", max_retries=2)
+def process_meeting_task(self, meeting_id: str) -> None:
+    _process_meeting(self, meeting_id, _run_pipeline)
+
+
+@celery_app.task(bind=True, name="process_live_meeting_task", max_retries=2)
+def process_live_meeting_task(self, meeting_id: str) -> None:
+    """Entry point for a finished live call (app/api/live_meeting.py). Takes
+    only the id — segments were already persisted via
+    StorageService.save_live_segments before this was dispatched, so the
+    Celery/Redis payload stays small regardless of call length."""
+
+    def run_pipeline(meeting: Meeting, on_progress) -> MeetingIntelligence:
+        segments = storage.get_live_segments(meeting_id)
+        return _analyze_transcript(meeting, segments, on_progress)
+
+    _process_meeting(self, meeting_id, run_pipeline)

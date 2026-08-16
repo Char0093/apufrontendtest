@@ -1,7 +1,12 @@
+from unittest.mock import MagicMock
+
 from app.core.config import Settings
+from app.models.meeting import Meeting
 from app.schemas.meeting_intelligence import Decision, MeetingAnalysis
 from app.services import askcoco_service
 from app.services.gemini_service import parse_analysis_response
+from app.services.storage_service import StorageService
+from app.tasks import meeting_tasks
 
 
 def test_demo_settings_do_not_require_external_api_keys():
@@ -107,3 +112,79 @@ def test_ask_coco_uses_predefined_action_item_query(monkeypatch):
     assert result["results"][0]["task"] == "Complete the security audit"
     assert result["cypher"] == captured["cypher"]
     assert "Complete the security audit" in result["answer"]
+
+
+def test_storage_round_trips_live_segments(tmp_path):
+    storage = StorageService(base_path=str(tmp_path))
+    segments = [{"speaker": "Alex", "identity": "alex-123", "text": "hello", "timestamp": "00:00:01", "start": 1.2}]
+
+    storage.save_live_segments("mtg-live-1", segments)
+
+    assert storage.get_live_segments("mtg-live-1") == segments
+
+
+def test_analyze_transcript_produces_intelligence_without_a_video_file(monkeypatch):
+    """Live sessions have no video file to run Vision on — _analyze_transcript
+    must work correctly with name_timestamps/all_detected_names omitted."""
+    monkeypatch.setattr(
+        meeting_tasks.gemini_service,
+        "run_gemini_analysis",
+        lambda transcript_text, names: {
+            "summary": "Quick sync",
+            "participants": ["Alex Chen"],
+            "speaker_map": {},
+            "decisions": [],
+            "action_items": [],
+            "risks": [],
+            "knowledge_triples": [],
+        },
+    )
+    monkeypatch.setattr(meeting_tasks.embedding_service, "index_meeting", lambda *a, **k: None)
+    monkeypatch.setattr(meeting_tasks.contradiction_service, "check_decisions", lambda *a, **k: [])
+
+    meeting = Meeting(id="mtg-live-2", title="Live: team-sync", file_path=None)
+    segments = [{"speaker": "Alex Chen", "identity": "alex-123", "text": "Let's sync quickly", "timestamp": "00:00:05", "start": 5.0}]
+
+    intelligence = meeting_tasks._analyze_transcript(meeting, segments, on_progress=lambda *a: None)
+
+    assert intelligence.meeting_id == "mtg-live-2"
+    assert intelligence.summary == "Quick sync"
+    assert intelligence.duration == "00:00:05"
+
+
+def test_process_live_meeting_task_reads_segments_and_saves_graph(monkeypatch, tmp_path):
+    # No id= passed: this suite runs against a real, non-isolated SQLite
+    # database (see conftest.py — no per-test rollback fixture), so a
+    # hardcoded id can collide with a row a previous run left behind (e.g.
+    # a test that fails after its own commit but before finishing). Meeting
+    # already defaults id to a fresh uuid4 — use that instead of fighting it.
+    storage = StorageService(base_path=str(tmp_path))
+    monkeypatch.setattr(meeting_tasks, "storage", storage)
+
+    db = meeting_tasks.SessionLocal()
+    meeting = Meeting(title="Live: team-sync", file_path=None, status="pending")
+    db.add(meeting)
+    db.commit()
+    meeting_id = meeting.id
+    db.close()
+
+    try:
+        storage.save_live_segments(meeting_id, [{"speaker": "Alex", "identity": "a", "text": "hi", "timestamp": "00:00:01", "start": 1.0}])
+
+        fake_intelligence = MagicMock(decisions=[], action_items=[], flags=[])
+        monkeypatch.setattr(meeting_tasks, "_analyze_transcript", lambda meeting, segments, on_progress: fake_intelligence)
+        save_and_graph_calls = []
+        monkeypatch.setattr(meeting_tasks, "_save_and_graph", lambda meeting, intelligence: save_and_graph_calls.append((meeting.id, intelligence)))
+
+        meeting_tasks.process_live_meeting_task.run(meeting_id)
+
+        assert save_and_graph_calls == [(meeting_id, fake_intelligence)]
+        db = meeting_tasks.SessionLocal()
+        updated = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+        assert updated.status == "completed"
+        db.close()
+    finally:
+        db = meeting_tasks.SessionLocal()
+        db.query(Meeting).filter(Meeting.id == meeting_id).delete()
+        db.commit()
+        db.close()
