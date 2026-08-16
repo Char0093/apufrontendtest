@@ -163,6 +163,18 @@ export function useLiveMeetingSession(roomName: string, token: string): LiveMeet
     });
   }, [stopCapture]);
 
+  // useTracks() emits a brand-new array on essentially any room-wide track
+  // event (any participant's mic/camera changing state), not just this
+  // one. Depending on that array directly below would tear down and
+  // recreate the MediaRecorder on every such event — and since only a
+  // MediaRecorder's *first* chunk carries valid WebM container headers,
+  // every restart effectively truncates capture back down to one word.
+  // sid is a stable primitive that only changes when the actual track
+  // being captured changes (e.g. a device switch), so it's what the effect
+  // below depends on instead of the array.
+  const localMicTrack = microphones[0]?.publication.track;
+  const micTrackSid = localMicTrack?.sid;
+
   // Must respect LiveKit mute state: stop sending audio (and flip captions
   // off) the moment the mic is muted, not just stop what other
   // participants hear.
@@ -173,7 +185,7 @@ export function useLiveMeetingSession(roomName: string, token: string): LiveMeet
       return;
     }
 
-    const track = microphones[0]?.publication.track?.mediaStreamTrack;
+    const track = localMicTrack?.mediaStreamTrack;
     const ws = wsRef.current;
     if (!track || !ws) return;
 
@@ -187,7 +199,7 @@ export function useLiveMeetingSession(roomName: string, token: string): LiveMeet
 
     return () => recorder.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [captionsEnabled, isMicrophoneEnabled, microphones]);
+  }, [captionsEnabled, isMicrophoneEnabled, micTrackSid]);
 
   const dismissSuggestion = useCallback((id: string) => {
     setSuggestions((prev) => prev.filter((s) => s.id !== id));
