@@ -11,6 +11,7 @@ import {
   Camera,
   CameraOff,
   AlertCircle,
+  Captions,
   LogOut,
   Mic,
   MicOff,
@@ -22,8 +23,11 @@ import {
 } from 'lucide-react';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useLiveMeetingSession } from '../hooks/useLiveMeetingSession';
 import { askCoco, BackendCitation } from '../services/api';
 import { CollaborativeWhiteboard } from './CollaborativeWhiteboard';
+import { LiveSuggestionBanner } from './LiveSuggestionBanner';
+import { LiveTranscriptPanel } from './LiveTranscriptPanel';
 import { MeetingRecorder } from './MeetingRecorder';
 
 type JoinDetails = { token: string; serverUrl: string; roomName: string; displayName: string };
@@ -146,13 +150,15 @@ const CocoPanel: React.FC = () => {
   );
 };
 
-const RoomContent: React.FC<{ roomName: string; displayName: string; onLeave: () => void }> = ({ roomName, displayName, onLeave }) => {
+const RoomContent: React.FC<{ roomName: string; displayName: string; token: string; onLeave: () => void }> = ({ roomName, displayName, token, onLeave }) => {
   const participants = useParticipants();
   const cameraTracks = useTracks([Track.Source.Camera]);
   const screenTracks = useTracks([Track.Source.ScreenShare]);
   const { localParticipant, isCameraEnabled, isMicrophoneEnabled, isScreenShareEnabled } = useLocalParticipant();
   const [mediaError, setMediaError] = useState('');
   const [showCoco, setShowCoco] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
+  const liveSession = useLiveMeetingSession(roomName, token);
 
   const toggle = async (kind: 'microphone' | 'camera' | 'screen') => {
     try {
@@ -178,6 +184,8 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; onLeave: ()
 
       {mediaError && <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{mediaError}</div>}
 
+      <LiveSuggestionBanner suggestions={liveSession.suggestions} onDismiss={liveSession.dismissSuggestion} />
+
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_270px]">
         <div className="space-y-4">
           {screenTracks.length > 0 && (
@@ -200,6 +208,7 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; onLeave: ()
           </section>
           <CollaborativeWhiteboard />
           {showCoco && <CocoPanel />}
+          {showTranscript && <LiveTranscriptPanel transcript={liveSession.transcript} error={liveSession.captionsError || liveSession.connectionError} />}
         </div>
 
         <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-4">
@@ -226,6 +235,14 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; onLeave: ()
         >
           <Sparkles className="h-5 w-5" /><span>Coco</span>
         </button>
+        <button
+          onClick={() => { setShowTranscript((v) => !v); liveSession.toggleCaptions(); }}
+          className={`flex min-w-20 flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
+            liveSession.captionsEnabled ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          <Captions className="h-5 w-5" /><span>Transcript</span>
+        </button>
         <ToggleButton label="Share" enabled={isScreenShareEnabled} onClick={() => void toggle('screen')} icon={<MonitorUp className="h-5 w-5" />} inactiveIcon={<MonitorUp className="h-5 w-5" />} />
         <MeetingRecorder roomName={roomName} onError={setMediaError} />
         <button onClick={onLeave} className="flex min-w-20 flex-col items-center gap-1 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700"><LogOut className="h-5 w-5" /><span>Leave</span></button>
@@ -251,7 +268,7 @@ export const MeetingRoomView: React.FC = () => {
   };
 
   if (joinDetails) {
-    return <LiveKitRoom token={joinDetails.token} serverUrl={joinDetails.serverUrl} connect audio video onError={(roomError) => setError(roomError.message)}><RoomAudioRenderer /><RoomContent roomName={joinDetails.roomName} displayName={joinDetails.displayName} onLeave={() => { setJoinDetails(null); setError(''); }} /></LiveKitRoom>;
+    return <LiveKitRoom token={joinDetails.token} serverUrl={joinDetails.serverUrl} connect audio video onError={(roomError) => setError(roomError.message)}><RoomAudioRenderer /><RoomContent roomName={joinDetails.roomName} displayName={joinDetails.displayName} token={joinDetails.token} onLeave={() => { setJoinDetails(null); setError(''); }} /></LiveKitRoom>;
   }
 
   return (
