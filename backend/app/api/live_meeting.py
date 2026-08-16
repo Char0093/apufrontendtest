@@ -7,18 +7,22 @@ captions off mid-call (or never toggling them on at all) could finalize the
 meeting early or never create one at all.
 """
 import asyncio
+import json
 import re
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Header, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.core.logger import get_logger
 from app.database.session import SessionLocal
+from app.graph import contradiction_service
 from app.models.meeting import Meeting
+from app.services import live_transcription_service
 from app.services.storage_service import StorageService
 from app.tasks.meeting_tasks import process_live_meeting_task
 
@@ -35,6 +39,26 @@ router = APIRouter(prefix="/live-meeting", tags=["live-meeting"])
 
 _SAFE_ROOM = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
 _FINALIZE_GRACE_SECONDS = 45
+_CONTRADICTION_COOLDOWN_SECONDS = 15
+
+# Same house style as app.services.askcoco_service._SUMMARY_KEYWORDS —
+# phrase matching, not full NLP. A cheap pre-filter so contradiction checks
+# (an embedding search + a judge call) only run on text that plausibly
+# states a decision, not every sentence spoken in the room.
+_DECISION_KEYWORDS = (
+    "let's go with", "lets go with", "we'll", "we will", "decided", "decide",
+    "agreed", "final", "approved", "approve", "moving forward with",
+    "let's do", "lets do",
+)
+
+
+def _looks_decision_like(text: str) -> bool:
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in _DECISION_KEYWORDS)
+
+
+class TranscriptSoFarResponse(BaseModel):
+    segments: list[dict]
 
 
 @dataclass
@@ -109,6 +133,43 @@ def _create_meeting_from_session(room_name: str, started_at: datetime, segments:
     return meeting_id
 
 
+async def _forward_deepgram_results(
+    connection: "live_transcription_service.DeepgramLiveConnection",
+    websocket: WebSocket,
+    session: LiveMeetingSession,
+    identity: str,
+    display_name: str,
+) -> None:
+    while True:
+        text = await connection.results.get()
+        segment = {
+            "speaker": display_name,
+            "identity": identity,
+            "text": text,
+            "timestamp": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+            "start": (datetime.now(timezone.utc) - session.started_at).total_seconds(),
+        }
+        async with session.lock:
+            session.segments.append(segment)
+        await websocket.send_json({"type": "caption", **segment})
+
+        if _looks_decision_like(text):
+            now = time.monotonic()
+            should_check = False
+            async with session.lock:
+                if now - session.last_contradiction_check > _CONTRADICTION_COOLDOWN_SECONDS:
+                    session.last_contradiction_check = now
+                    should_check = True
+            if should_check:
+                flag = await asyncio.to_thread(contradiction_service.check_text, text, exclude_meeting_id=session.id)
+                if flag is not None:
+                    # flag.model_dump() first: Flag has its own "type" field
+                    # (FlagType — always "contradiction" here), which would
+                    # otherwise silently overwrite the envelope's "type" if
+                    # the spread came last.
+                    await websocket.send_json({**flag.model_dump(), "type": "contradiction_suggestion"})
+
+
 async def _finalize_after_grace_period(session: LiveMeetingSession) -> None:
     try:
         await asyncio.sleep(_FINALIZE_GRACE_SECONDS)
@@ -163,19 +224,79 @@ async def live_meeting_session(websocket: WebSocket, room_name: str) -> None:
             session.finalize_task.cancel()
             session.finalize_task = None
 
+    deepgram = None
+    forward_task = None
+
     try:
         while True:
             message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
                 break
-            # captions_on/off + audio handling lands in the next task —
-            # for now, anything text-typed with an unrecognized type, and
-            # any binary frame, is simply ignored (no captions capability
-            # exists yet on this branch of work).
+
+            if message.get("text") is not None:
+                try:
+                    payload = json.loads(message["text"])
+                except json.JSONDecodeError:
+                    continue
+                msg_type = payload.get("type")
+
+                if msg_type == "captions_on":
+                    if not settings.deepgram_api_key:
+                        await websocket.send_json({"type": "captions_error", "message": "Live captions are not configured on this server."})
+                        continue
+                    if deepgram is None:
+                        try:
+                            deepgram = await live_transcription_service.open_connection()
+                        except Exception as exc:
+                            logger.warning(f"Failed to open Deepgram connection: {exc}")
+                            await websocket.send_json({"type": "captions_error", "message": "Could not start live captions right now."})
+                            continue
+                        forward_task = asyncio.create_task(
+                            _forward_deepgram_results(deepgram, websocket, session, identity, display_name)
+                        )
+
+                elif msg_type == "captions_off":
+                    if deepgram is not None:
+                        if forward_task is not None:
+                            forward_task.cancel()
+                            forward_task = None
+                        await deepgram.close()
+                        deepgram = None
+
+            elif message.get("bytes") is not None and deepgram is not None:
+                try:
+                    await deepgram.send_audio(message["bytes"])
+                except Exception as exc:
+                    # A mid-call Deepgram drop must not crash the session WS
+                    # (presence stays up) — degrade to captions_error instead.
+                    logger.warning(f"Deepgram send failed, closing captions: {exc}")
+                    await websocket.send_json({"type": "captions_error", "message": "Live captions disconnected."})
+                    if forward_task is not None:
+                        forward_task.cancel()
+                        forward_task = None
+                    deepgram = None
     except WebSocketDisconnect:
         pass
     finally:
+        if forward_task is not None:
+            forward_task.cancel()
+        if deepgram is not None:
+            await deepgram.close()
         async with session.lock:
             session.active_connections -= 1
             if session.active_connections <= 0:
                 session.finalize_task = asyncio.create_task(_finalize_after_grace_period(session))
+
+
+@router.get("/{room_name}/transcript-so-far", response_model=TranscriptSoFarResponse)
+def get_transcript_so_far(room_name: str, authorization: str = Header(default="")) -> TranscriptSoFarResponse:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        _verify_token(token, room_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+    session = _sessions.get(room_name)
+    return TranscriptSoFarResponse(segments=list(session.segments) if session else [])
