@@ -3,18 +3,14 @@ import { useApp } from '../context/AppContext';
 import { 
   Brain, 
   Lock, 
-  Mail, 
-  Building2, 
-  ArrowRight, 
-  ShieldCheck, 
-  Sparkles
+  User, 
+  ArrowRight
 } from 'lucide-react';
 
 export const LoginModal: React.FC = () => {
   const { isLoggedIn, login } = useApp();
-  const [email, setEmail] = useState('alex.mercer@corpbrain.ai');
-  const [password, setPassword] = useState('••••••••••••');
-  const [department, setDepartment] = useState('Engineering & AI');
+  const [username, setUsername] = useState('Thim Yee Song');
+  const [password, setPassword] = useState('123');
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
 
@@ -22,24 +18,24 @@ export const LoginModal: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) {
-      setError('Please enter a valid work email.');
+    if (!username.trim()) {
+      setError('Please enter a username.');
       return;
     }
-    const success = login(email, password, department);
+    const success = login(username, password);
     if (!success) {
       setError('Authentication failed. Please check your credentials.');
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 min-h-screen flex items-center justify-center p-6 bg-slate-50 dark:bg-slate-950 font-sans animate-fade-in overflow-y-auto">
-      {/* Sleek Crisp White Floating Card */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl max-w-md w-full p-8 text-slate-900 dark:text-white my-auto">
+    <div className="fixed inset-0 z-50 w-full min-h-screen flex items-center justify-center bg-white dark:bg-slate-950 font-sans animate-fade-in p-4 sm:p-6 overflow-y-auto">
+      {/* Login Card */}
+      <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-xl p-6 sm:p-8 text-slate-900 dark:text-white my-auto">
         
         {/* Header Section */}
         <div className="text-center space-y-2 mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center mx-auto shadow-md shadow-indigo-600/30">
+          <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center mx-auto shadow-md shadow-blue-600/30">
             <Brain className="w-7 h-7" />
           </div>
 
@@ -58,20 +54,20 @@ export const LoginModal: React.FC = () => {
           </div>
         )}
 
-        {/* Standard Login Form Controls */}
+        {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-              Work Email Address
+              Username
             </label>
             <div className="relative">
-              <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+              <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-600 focus:bg-white dark:focus:bg-slate-900 focus:outline-none transition-colors"
-                placeholder="name@company.com"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-600 focus:bg-white dark:focus:bg-slate-900 focus:outline-none transition-colors"
+                placeholder="Enter username"
                 required
               />
             </div>
@@ -87,31 +83,10 @@ export const LoginModal: React.FC = () => {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-600 focus:bg-white dark:focus:bg-slate-900 focus:outline-none transition-colors"
-                placeholder="••••••••••••"
+                className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-600 focus:bg-white dark:focus:bg-slate-900 focus:outline-none transition-colors"
+                placeholder="Password"
                 required
               />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-              Department Selection
-            </label>
-            <div className="relative">
-              <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-              <select
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-600 focus:bg-white dark:focus:bg-slate-900 focus:outline-none transition-colors cursor-pointer"
-              >
-                <option value="Engineering & AI">Engineering & AI</option>
-                <option value="Core Systems">Core Systems</option>
-                <option value="Product Strategy">Product Strategy</option>
-                <option value="Executive Ops">Executive Ops</option>
-                <option value="ML & Graph Pipeline">ML & Graph Pipeline</option>
-                <option value="Legal & Compliance">Legal & Compliance</option>
-              </select>
             </div>
           </div>
 
@@ -122,11 +97,11 @@ export const LoginModal: React.FC = () => {
                 type="checkbox"
                 checked={rememberMe}
                 onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
               />
               <span>Remember me</span>
             </label>
-            <a href="#forgot" onClick={(e) => e.preventDefault()} className="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold">
+            <a href="#forgot" onClick={(e) => e.preventDefault()} className="text-blue-600 dark:text-blue-400 hover:underline font-semibold">
               Forgot password?
             </a>
           </div>
@@ -134,24 +109,12 @@ export const LoginModal: React.FC = () => {
           {/* Primary CTA Button */}
           <button
             type="submit"
-            className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all hover:scale-[1.01] cursor-pointer mt-2"
+            className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm shadow-blue-600/30 flex items-center justify-center space-x-2 transition-all hover:scale-[1.01] cursor-pointer mt-2"
           >
             <span>Sign In</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>
-
-        {/* Footer Security Badges */}
-        <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-          <span className="flex items-center space-x-1 font-medium">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>SOC2 Type II Certified</span>
-          </span>
-          <span className="flex items-center space-x-1 font-medium">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>LLM Encryption Active</span>
-          </span>
-        </div>
 
       </div>
     </div>

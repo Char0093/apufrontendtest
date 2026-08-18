@@ -188,7 +188,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
+            <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md shrink-0">
               <Calendar className="w-5 h-5" />
             </div>
             <div>
@@ -217,7 +217,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               placeholder="e.g., Sprint Planning & Technical Debt Review"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm focus:outline-hidden focus:border-indigo-600 placeholder-slate-400 transition-all"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm focus:outline-hidden focus:border-blue-600 placeholder-slate-400 transition-all"
             />
           </div>
 
@@ -230,7 +230,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <select
                 value={project}
                 onChange={(e) => setProject(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-indigo-600 cursor-pointer"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-600 cursor-pointer"
               >
                 {availableProjects.map((proj) => (
                   <option key={proj} value={proj}>{proj}</option>
@@ -243,7 +243,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   placeholder="New Project Name"
                   value={customProject}
                   onChange={(e) => setCustomProject(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:border-indigo-600"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:border-blue-600"
                 />
               )}
             </div>
@@ -253,7 +253,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <Calendar className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 Meeting Date *
               </label>
               <input
@@ -261,13 +261,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 required
                 value={meetingDate}
                 onChange={(e) => setMeetingDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-indigo-600 transition-all"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-600 transition-all"
               />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 Meeting Time *
               </label>
               <input
@@ -275,7 +275,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 required
                 value={meetingTime}
                 onChange={(e) => setMeetingTime(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-indigo-600 transition-all"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-600 transition-all"
               />
             </div>
           </div>
@@ -286,23 +286,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               Meeting Participants (Invited Team Members)
             </label>
             
-            <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 space-y-2 focus-within:border-indigo-600 transition-all">
+            <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 space-y-2 focus-within:border-blue-600 transition-all">
               {/* Selected Employee Chips */}
               <div className="flex flex-wrap gap-1.5">
                 {selectedEmployees.map((emp) => (
                   <span
                     key={emp.id}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200 text-xs font-semibold shadow-2xs"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-xs font-semibold shadow-2xs"
                   >
-                    <User className="w-3 h-3 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                    <User className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
                     <span>{emp.name}</span>
-                    <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.2 rounded-md font-medium">
+                    <span className="text-[10px] bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-1.5 py-0.2 rounded-md font-medium">
                       {emp.department}
                     </span>
                     <button
                       type="button"
                       onClick={() => handleRemoveEmployee(emp.id)}
-                      className="p-0.5 rounded-full hover:bg-indigo-200 dark:hover:bg-indigo-800 text-indigo-500 hover:text-indigo-900 transition-colors cursor-pointer"
+                      className="p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-500 hover:text-blue-900 transition-colors cursor-pointer"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -326,11 +326,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     setIsDropdownOpen(true);
                   }}
                   onFocus={() => setIsDropdownOpen(true)}
-                  className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:border-indigo-600 placeholder-slate-400"
+                  className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:border-blue-600 placeholder-slate-400"
                 />
                 <ChevronDown 
                   className={`w-3.5 h-3.5 absolute right-2.5 text-slate-400 transition-transform cursor-pointer ${
-                    isDropdownOpen ? 'rotate-180 text-indigo-600' : ''
+                    isDropdownOpen ? 'rotate-180 text-blue-600' : ''
                   }`}
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                 />
@@ -346,15 +346,15 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                       <div
                         key={emp.id}
                         onClick={() => handleAddEmployee(emp)}
-                        className="p-2.5 hover:bg-indigo-50/80 dark:hover:bg-slate-800 cursor-pointer transition-colors flex items-center justify-between group"
+                        className="p-2.5 hover:bg-blue-50/80 dark:hover:bg-slate-800 cursor-pointer transition-colors flex items-center justify-between group"
                       >
                         <div className="flex items-center gap-2.5 truncate">
-                          <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center shrink-0">
+                          <div className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold text-xs flex items-center justify-center shrink-0">
                             {emp.name.charAt(0)}
                           </div>
                           <div className="truncate">
                             <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                              <span className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
                                 {emp.name}
                               </span>
                               <span className="px-1.5 py-0.2 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-medium border border-slate-200 dark:border-slate-700">
@@ -366,7 +366,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
                         <button
                           type="button"
-                          className="px-2 py-1 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 font-semibold text-[11px] flex items-center gap-1 transition-colors shrink-0"
+                          className="px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 font-semibold text-[11px] flex items-center gap-1 transition-colors shrink-0"
                         >
                           <Plus className="w-3 h-3" />
                           <span>Add</span>
@@ -400,7 +400,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               className={`border-2 border-dashed rounded-2xl p-5 text-center transition-all ${
                 selectedFile
                   ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/30'
-                  : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 hover:border-indigo-500 dark:hover:border-indigo-500'
+                  : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 hover:border-blue-500 dark:hover:border-blue-500'
               }`}
             >
               <input
@@ -423,9 +423,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   </>
                 ) : (
                   <>
-                    <UploadCloud className="w-8 h-8 text-indigo-600 dark:text-indigo-400 mb-1" />
+                    <UploadCloud className="w-8 h-8 text-blue-600 dark:text-blue-400 mb-1" />
                     <p className="text-xs text-slate-700 dark:text-slate-300 font-semibold">
-                      Drag & drop recording file, or <span className="text-indigo-600 dark:text-indigo-400 underline">browse</span>
+                      Drag & drop recording file, or <span className="text-blue-600 dark:text-blue-400 underline">browse</span>
                     </p>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">Attach audio now to immediately trigger AI transcription & decision extraction</p>
                   </>
@@ -448,13 +448,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting || !title.trim()}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold disabled:opacity-50 shadow-md flex items-center gap-2 transition-all cursor-pointer"
+                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50 shadow-md flex items-center gap-2 transition-all cursor-pointer"
               >
                 {isSubmitting ? (
                   <>Processing AI Pipeline...</>
                 ) : (
                   <>
-                    <Sparkles className="w-4 h-4 text-indigo-200" />
+                    <Sparkles className="w-4 h-4 text-blue-200" />
                     <span>Create & Start AI Pipeline</span>
                   </>
                 )}
@@ -463,7 +463,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting || !title.trim()}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold disabled:opacity-50 shadow-md flex items-center gap-2 transition-all cursor-pointer"
+                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50 shadow-md flex items-center gap-2 transition-all cursor-pointer"
               >
                 {isSubmitting ? (
                   <>Scheduling...</>

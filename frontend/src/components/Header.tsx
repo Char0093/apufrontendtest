@@ -15,7 +15,8 @@ import {
   Users,
   RefreshCw,
   Check,
-  X
+  X,
+  Plus
 } from 'lucide-react';
 import { TabType, Notification as AppNotification } from '../types';
 
@@ -101,7 +102,7 @@ export const Header: React.FC = () => {
       case 'contradiction':
         return <ShieldAlert className="w-4 h-4 text-rose-500" />;
       case 'meeting':
-        return <Calendar className="w-4 h-4 text-indigo-500" />;
+        return <Calendar className="w-4 h-4 text-blue-500" />;
       case 'message':
         return <MessageSquare className="w-4 h-4 text-sky-500" />;
       case 'action_item':
@@ -119,16 +120,13 @@ export const Header: React.FC = () => {
         <div className="flex items-center space-x-3 shrink-0">
           <div 
             onClick={() => setActiveTab('dashboard')}
-            className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center cursor-pointer shadow-md shadow-indigo-600/30 hover:scale-105 transition-transform"
+            className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center cursor-pointer shadow-md shadow-blue-600/30 hover:scale-105 transition-transform"
           >
             <Brain className="w-6 h-6 text-white" />
           </div>
           <div>
             <div className="font-extrabold text-slate-900 dark:text-white tracking-tight text-base font-sans flex items-center gap-1.5">
               Corporate Brain
-              <span className="px-2 py-0.5 text-[10px] font-extrabold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded-md">
-                PRO
-              </span>
             </div>
             <p className="text-[11px] text-slate-400 font-medium">
               AI Decision Intelligence & Anomaly Engine
@@ -149,7 +147,7 @@ export const Header: React.FC = () => {
                 setIsSearchFocused(true);
               }}
               placeholder="Search meetings, decisions, graph nodes, or action items..."
-              className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-900 transition-all shadow-2xs"
+              className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-100/80 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-slate-900 transition-all shadow-2xs"
             />
           </div>
 
@@ -168,7 +166,7 @@ export const Header: React.FC = () => {
                         setActiveTab('meetings');
                         setIsSearchFocused(false);
                       }}
-                      className="px-3 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded-xl cursor-pointer transition-colors"
+                      className="px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-xl cursor-pointer transition-colors"
                     >
                       <div className="text-xs font-bold text-slate-900 dark:text-white">{m.title}</div>
                       <div className="text-[11px] text-slate-400">{m.project} • {m.dateTime}</div>
@@ -189,7 +187,7 @@ export const Header: React.FC = () => {
                         switchDemoUser(e.id);
                         setIsSearchFocused(false);
                       }}
-                      className="px-3 py-2 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded-xl cursor-pointer transition-colors flex items-center space-x-2"
+                      className="px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-xl cursor-pointer transition-colors flex items-center space-x-2"
                     >
                       <img src={e.avatarUrl} alt={e.name} className="w-6 h-6 rounded-full object-cover" />
                       <div>
@@ -213,25 +211,26 @@ export const Header: React.FC = () => {
         {/* Right Controls Group */}
         <div className="flex items-center space-x-3 shrink-0">
 
-          {/* Single Consolidated Schedule Meeting Button */}
+          {/* Circular Calendar Schedule Meeting Button */}
           <button
             onClick={() => setIsCreateMeetingOpen(true)}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-2xl shadow-md shadow-indigo-600/30 flex items-center space-x-2 transition-all hover:scale-[1.02]"
+            title="Schedule Meeting"
+            aria-label="Schedule Meeting"
+            className="p-2.5 rounded-full bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-blue-400 border border-blue-200/80 dark:border-blue-800/60 transition-all hover:scale-105 cursor-pointer flex items-center justify-center shadow-2xs"
           >
-            <Calendar className="w-4 h-4" />
-            <span>+ Schedule Meeting</span>
+            <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           </button>
 
           {/* Notifications Bell Icon */}
           <div className="relative" ref={notifRef}>
             <button
               onClick={() => setIsNotifOpen(!isNotifOpen)}
-              className="p-2.5 rounded-2xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors relative"
+              className="p-2.5 rounded-full text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors relative cursor-pointer"
               title="In-App Notifications"
             >
               <Bell className="w-5 h-5 text-slate-700 dark:text-slate-200" />
               {unreadCount > 0 && (
-                <span className="absolute top-1 right-1 px-1.5 py-0.5 bg-rose-500 text-white text-[10px] font-extrabold rounded-full animate-pulse border-2 border-white dark:border-slate-900 shadow-sm">
+                <span className="absolute top-1 right-1 px-1.5 py-0.5 bg-rose-500 text-white text-[10px] font-extrabold rounded-full border-2 border-white dark:border-slate-900 shadow-xs">
                   {unreadCount}
                 </span>
               )}
@@ -242,10 +241,10 @@ export const Header: React.FC = () => {
               <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden z-50 animate-fade-in">
                 <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <Bell className="w-4 h-4 text-indigo-400" />
+                    <Bell className="w-4 h-4 text-blue-400" />
                     <span className="text-xs font-bold font-sans">In-App Notifications</span>
                     {unreadCount > 0 && (
-                      <span className="px-2 py-0.5 bg-indigo-600 text-white text-[10px] font-extrabold rounded-full">
+                      <span className="px-2 py-0.5 bg-blue-600 text-white text-[10px] font-extrabold rounded-full">
                         {unreadCount} new
                       </span>
                     )}
@@ -253,7 +252,7 @@ export const Header: React.FC = () => {
 
                   <button
                     onClick={markAllAsRead}
-                    className="text-[11px] text-indigo-300 hover:text-white flex items-center space-x-1 font-semibold"
+                    className="text-[11px] text-blue-300 hover:text-white flex items-center space-x-1 font-semibold"
                   >
                     <CheckCheck className="w-3.5 h-3.5" />
                     <span>Mark all read</span>
@@ -266,7 +265,7 @@ export const Header: React.FC = () => {
                     onClick={() => setNotifFilter('all')}
                     className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-colors ${
                       notifFilter === 'all'
-                        ? 'bg-indigo-600 text-white'
+                        ? 'bg-blue-600 text-white'
                         : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
@@ -276,7 +275,7 @@ export const Header: React.FC = () => {
                     onClick={() => setNotifFilter('unread')}
                     className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-colors ${
                       notifFilter === 'unread'
-                        ? 'bg-indigo-600 text-white'
+                        ? 'bg-blue-600 text-white'
                         : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
@@ -297,7 +296,7 @@ export const Header: React.FC = () => {
                         onClick={() => handleNotificationClick(notif)}
                         className={`p-3.5 flex items-start space-x-3 cursor-pointer transition-colors ${
                           !notif.read
-                            ? 'bg-indigo-50/40 dark:bg-indigo-950/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/50'
+                            ? 'bg-blue-50/40 dark:bg-blue-950/30 hover:bg-blue-50 dark:hover:bg-blue-950/50'
                             : 'hover:bg-slate-50 dark:hover:bg-slate-850'
                         }`}
                       >
@@ -339,7 +338,7 @@ export const Header: React.FC = () => {
                 <img
                   src={currentUser.avatarUrl}
                   alt={currentUser.name}
-                  className="w-9 h-9 rounded-full object-cover shrink-0 ring-2 ring-indigo-500/30"
+                  className="w-9 h-9 rounded-full object-cover shrink-0 ring-2 ring-blue-500/30"
                 />
                 <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
               </div>
@@ -363,7 +362,7 @@ export const Header: React.FC = () => {
                   <div className="text-xs font-bold text-slate-900 dark:text-white">
                     {currentUser.name}
                   </div>
-                  <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold">
+                  <div className="text-[10px] text-blue-600 dark:text-blue-400 font-bold">
                     {currentUser.department} Department
                   </div>
                   <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5">
@@ -371,76 +370,19 @@ export const Header: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Sub-Menu: Demo Account Switcher Options */}
-                {isSwitcherOpen ? (
-                  <div className="p-2 space-y-1">
-                    <div className="flex items-center justify-between px-2 py-1 border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
-                      <span>Select Demo Employee</span>
-                      <button
-                        onClick={() => setIsSwitcherOpen(false)}
-                        className="text-slate-400 hover:text-slate-600"
-                      >
-                        Back
-                      </button>
-                    </div>
-
-                    {employees.map((emp) => {
-                      const isCurrent = currentUser.name.toLowerCase() === emp.name.toLowerCase();
-                      return (
-                        <div
-                          key={emp.id}
-                          onClick={() => {
-                            switchDemoUser(emp.id);
-                            setIsSwitcherOpen(false);
-                            setIsProfileOpen(false);
-                          }}
-                          className={`p-2 rounded-xl flex items-center justify-between cursor-pointer transition-colors ${
-                            isCurrent
-                              ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold'
-                              : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
-                          }`}
-                        >
-                          <div className="flex items-center space-x-2.5 min-w-0">
-                            <img src={emp.avatarUrl} alt={emp.name} className="w-7 h-7 rounded-full object-cover shrink-0" />
-                            <div className="truncate">
-                              <div className="text-xs font-bold truncate">{emp.name}</div>
-                              <div className="text-[10px] text-slate-400 truncate">{emp.role}</div>
-                            </div>
-                          </div>
-                          {isCurrent && <Check className="w-4 h-4 text-indigo-600 shrink-0 ml-1" />}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="p-1 space-y-0.5 text-xs">
-                    {/* Settings Menu Item */}
-                    <button
-                      onClick={() => {
-                        setActiveTab('settings');
-                        setIsProfileOpen(false);
-                      }}
-                      className="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl flex items-center space-x-2.5 transition-colors font-medium"
-                    >
-                      <UserIcon className="w-4 h-4 text-indigo-500" />
-                      <span>Profile & Account Settings</span>
-                    </button>
-
-                    {/* Switch Account Demo Switcher Button */}
-                    <button
-                      onClick={() => setIsSwitcherOpen(true)}
-                      className="w-full text-left px-3 py-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded-xl flex items-center justify-between transition-colors font-bold"
-                    >
-                      <div className="flex items-center space-x-2.5">
-                        <RefreshCw className="w-4 h-4 text-indigo-500" />
-                        <span>Switch Demo Account</span>
-                      </div>
-                      <span className="text-[10px] px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 rounded font-mono">
-                        Demo
-                      </span>
-                    </button>
-                  </div>
-                )}
+                <div className="p-1 space-y-0.5 text-xs">
+                  {/* Settings Menu Item */}
+                  <button
+                    onClick={() => {
+                      setActiveTab('settings');
+                      setIsProfileOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl flex items-center space-x-2.5 transition-colors font-medium cursor-pointer"
+                  >
+                    <UserIcon className="w-4 h-4 text-blue-500" />
+                    <span>Profile & Account Settings</span>
+                  </button>
+                </div>
 
                 {/* Logout Action */}
                 <div className="p-1 border-t border-slate-100 dark:border-slate-800">

@@ -55,8 +55,12 @@ if exist "backend\.venv\.deps_installed" (
     echo done > "backend\.venv\.deps_installed"
 )
 
-echo [3/4] Starting backend API + Celery worker...
+echo [3/4] Starting backend API + Ask Coco server + Celery worker...
+
 start "Corporate Brain - Backend API" cmd /k "cd /d "%~dp0backend" && .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
+if exist "ASK COCO\server.py" (
+    start "Corporate Brain - Ask Coco Server" cmd /k ""%~dp0launch_askcoco.bat""
+)
 start "Corporate Brain - Celery Worker" cmd /k "cd /d "%~dp0backend" && .venv\Scripts\python.exe -m celery -A app.core.celery_app worker --loglevel=info --pool=solo"
 
 echo [4/4] Starting frontend dev server...

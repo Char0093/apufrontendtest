@@ -38,8 +38,8 @@ export const EmployeeDirectoryView: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
         <div>
           <h1 className="text-xl font-bold font-sans text-slate-900 dark:text-white flex items-center space-x-2">
-            <Users className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <span>Employee Directory & Directory Info</span>
+            <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <span>Employee Directory</span>
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
             Directory of cross-functional team members, online status, and quick direct message launcher.
@@ -57,7 +57,7 @@ export const EmployeeDirectoryView: React.FC = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search staff by name, role..."
-              className="pl-9 pr-8 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-colors"
+              className="pl-9 pr-8 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
             />
             {searchQuery && (
               <button 
@@ -109,7 +109,7 @@ export const EmployeeDirectoryView: React.FC = () => {
                       <img
                         src={emp.avatarUrl}
                         alt={emp.name}
-                        className="w-12 h-12 rounded-full object-cover ring-2 ring-indigo-500/20"
+                        className="w-12 h-12 rounded-full object-cover ring-2 ring-blue-500/20"
                       />
                       <span
                         className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${
@@ -120,10 +120,10 @@ export const EmployeeDirectoryView: React.FC = () => {
                     </div>
 
                     <div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white font-sans group-hover:text-indigo-600 transition-colors">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white font-sans group-hover:text-blue-600 transition-colors">
                         {emp.name}
                       </h3>
-                      <div className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                      <div className="text-xs font-semibold text-blue-600 dark:text-blue-400">
                         {emp.role}
                       </div>
                     </div>
@@ -145,12 +145,22 @@ export const EmployeeDirectoryView: React.FC = () => {
                 <div className="space-y-1.5 text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
                   <div className="flex items-center space-x-2">
                     <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="truncate">{emp.email}</span>
+                    <a
+                      href={`mailto:${emp.email}`}
+                      className="truncate text-slate-500 dark:text-slate-400 hover:underline"
+                    >
+                      {emp.email}
+                    </a>
                   </div>
 
                   <div className="flex items-center space-x-2">
                     <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span>{emp.phone}</span>
+                    <a
+                      href={`tel:${emp.phone.replace(/[^0-9+]/g, '')}`}
+                      className="text-slate-500 dark:text-slate-400 hover:underline"
+                    >
+                      {emp.phone}
+                    </a>
                   </div>
 
                   {emp.location && (
@@ -171,7 +181,7 @@ export const EmployeeDirectoryView: React.FC = () => {
 
                 <button
                   onClick={() => openChatWithUser(emp.id)}
-                  className="px-3.5 py-1.5 bg-indigo-50 dark:bg-indigo-950/80 hover:bg-indigo-600 text-indigo-600 dark:text-indigo-400 hover:text-white text-xs font-semibold rounded-xl border border-indigo-200 dark:border-indigo-800/60 flex items-center space-x-1.5 transition-all shadow-xs"
+                  className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-950/80 hover:bg-blue-600 text-blue-600 dark:text-blue-400 hover:text-white text-xs font-semibold rounded-xl border border-blue-200 dark:border-blue-800/60 flex items-center space-x-1.5 transition-all shadow-xs"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
                   <span>Direct Message</span>

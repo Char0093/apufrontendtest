@@ -20,6 +20,8 @@ import {
   Sparkles,
   Users,
   Video,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
@@ -124,7 +126,7 @@ const CocoPanel: React.FC = () => {
             <div
               className={`inline-block max-w-[92%] rounded-xl px-3 py-2 text-xs whitespace-pre-wrap text-left ${
                 m.role === 'user'
-                  ? 'bg-indigo-600 text-white'
+                  ? 'bg-blue-600 text-white'
                   : 'bg-white border border-slate-200 text-slate-700'
               }`}
             >
@@ -153,12 +155,12 @@ const CocoPanel: React.FC = () => {
             if (e.key === 'Enter') send();
           }}
           placeholder="Ask a question…"
-          className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-indigo-600"
+          className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-blue-600"
         />
         <button
           onClick={() => void send()}
           disabled={isAsking || !input.trim()}
-          className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Send className="h-3.5 w-3.5" /> Ask
         </button>
@@ -175,6 +177,9 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
   const [mediaError, setMediaError] = useState('');
   const [showCoco, setShowCoco] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
+  const [isScreenEnlarged, setIsScreenEnlarged] = useState(false);
+  const [isProcessingPipeline, setIsProcessingPipeline] = useState(false);
+  const [pipelineStep, setPipelineStep] = useState(0);
   const liveSession = useLiveMeetingSession(roomName, token);
 
   const toggle = async (kind: 'microphone' | 'camera' | 'screen') => {
@@ -188,13 +193,62 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
     }
   };
 
+  const handleLeaveMeeting = () => {
+    setIsProcessingPipeline(true);
+    setPipelineStep(1);
+
+    const steps = [
+      'Extracting audio (16kHz mono WAV)...',
+      'Running PyAnnote 3.1 speaker diarization timeline...',
+      'Deepgram & Whisper timestamped transcription...',
+      'Gemini Vision reading speaker nameplates...',
+      'Gemini 2.5 Flash extracting decisions, actions & flags...',
+      'Indexing results into Corporate Brain & saving whiteboard PDF...'
+    ];
+
+    let current = 1;
+    const interval = setInterval(() => {
+      current += 1;
+      if (current <= steps.length) {
+        setPipelineStep(current);
+      } else {
+        clearInterval(interval);
+        setTimeout(() => {
+          setIsProcessingPipeline(false);
+          onLeave();
+        }, 600);
+      }
+    }, 600);
+  };
+
+  const pipelineStages = [
+    { title: 'Audio Extraction', desc: 'ffmpeg: video -> 16kHz mono WAV' },
+    { title: 'Speaker Diarization', desc: 'PyAnnote 3.1 speaker timeline alignment' },
+    { title: 'Deepgram & Whisper ASR', desc: 'Timestamped transcript generation' },
+    { title: 'Gemini Vision Nameplates', desc: 'Extracting video frame nameplates' },
+    { title: 'Gemini Flash AI Analysis', desc: 'Extracting decisions, rationale & action items' },
+    { title: 'Knowledge Graph Ingestion', desc: 'Saving meeting intelligence & whiteboard PDF' }
+  ];
+
   return (
     <div data-meeting-recording-area className="space-y-5 p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" /><span className="text-xs font-bold uppercase tracking-wider text-emerald-700">Live</span></div>
-          <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-900">{roomName}</h1>
-          <p className="text-sm text-slate-500">Joined as {displayName}</p>
+          <div className="flex items-center gap-2">
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 font-sans">Room Code: {roomName}</h1>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(roomName);
+                alert(`Room Code "${roomName}" copied to clipboard! Share this exact code with teammates to join this session.`);
+              }}
+              className="px-2.5 py-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-lg border border-blue-200 transition-colors cursor-pointer"
+            >
+              Copy Room Code
+            </button>
+          </div>
         </div>
         <span className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600"><Users className="h-4 w-4 text-indigo-600" />{participants.length} participant{participants.length === 1 ? '' : 's'}</span>
       </div>
@@ -206,10 +260,61 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_270px]">
         <div className="space-y-4">
           {screenTracks.length > 0 && (
-            <section className="overflow-hidden rounded-2xl border border-indigo-200 bg-slate-950 shadow-sm">
-              <div className="flex items-center gap-2 bg-indigo-600 px-3 py-2 text-xs font-bold text-white"><MonitorUp className="h-4 w-4" />Screen share</div>
-              <VideoTrack trackRef={screenTracks[0]} className="max-h-[52vh] w-full object-contain" />
+            <section className="relative overflow-hidden rounded-2xl border border-blue-200 bg-slate-950 shadow-sm group">
+              <div className="flex items-center justify-between bg-blue-600 px-3 py-2 text-xs font-bold text-white">
+                <div className="flex items-center gap-2">
+                  <MonitorUp className="h-4 w-4" />
+                  <span>Screen Share ({screenTracks[0].participant.name || 'Participant'})</span>
+                </div>
+              </div>
+
+              <div className="relative w-full flex items-center justify-center">
+                <VideoTrack trackRef={screenTracks[0]} className="max-h-[52vh] w-full object-contain" />
+
+                {/* Bottom Right Corner Enlarge / Fullscreen Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsScreenEnlarged(!isScreenEnlarged)}
+                  title={isScreenEnlarged ? "Exit Fullscreen" : "Enlarge Screen Share"}
+                  className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-xl bg-slate-900/90 hover:bg-blue-600 text-white px-3 py-2 text-xs font-bold shadow-lg backdrop-blur-md transition-all hover:scale-105 border border-white/20 cursor-pointer"
+                >
+                  <Maximize2 className="h-4 w-4 text-blue-400 group-hover:text-white" />
+                  <span>Enlarge Screen</span>
+                </button>
+              </div>
             </section>
+          )}
+
+          {/* Fullscreen Overlay when Enlarged */}
+          {isScreenEnlarged && screenTracks.length > 0 && (
+            <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/95 p-4 sm:p-6 animate-fade-in backdrop-blur-md">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-white shrink-0">
+                <div className="flex items-center gap-2 text-sm font-bold font-sans">
+                  <MonitorUp className="h-5 w-5 text-blue-400" />
+                  <span>Screen Share — Fullscreen View ({roomName})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsScreenEnlarged(false)}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
+                >
+                  <Minimize2 className="h-4 w-4" />
+                  <span>Exit Fullscreen</span>
+                </button>
+              </div>
+              <div className="flex-1 flex items-center justify-center overflow-hidden p-2 relative">
+                <VideoTrack trackRef={screenTracks[0]} className="max-h-[88vh] max-w-full rounded-2xl object-contain shadow-2xl" />
+
+                <button
+                  type="button"
+                  onClick={() => setIsScreenEnlarged(false)}
+                  className="absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 text-xs font-bold shadow-xl transition-all hover:scale-105 border border-white/20 cursor-pointer"
+                >
+                  <Minimize2 className="h-4 w-4" />
+                  <span>Minimize</span>
+                </button>
+              </div>
+            </div>
           )}
           <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
@@ -223,13 +328,13 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
               )}
             </div>
           </section>
-          <CollaborativeWhiteboard />
+          <CollaborativeWhiteboard roomName={roomName} />
           {showCoco && <CocoPanel />}
           {showTranscript && <LiveTranscriptPanel transcript={liveSession.transcript} error={liveSession.captionsError || liveSession.connectionError} />}
         </div>
 
         <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-4">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-800"><Users className="h-4 w-4 text-indigo-600" />Participants</h2>
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-800"><Users className="h-4 w-4 text-blue-600" />Participants</h2>
           <ul className="space-y-2">
             {participants.map((participant) => (
               <li key={participant.identity} className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2">
@@ -255,22 +360,82 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
         <button
           onClick={() => { setShowTranscript((v) => !v); liveSession.toggleCaptions(); }}
           className={`flex min-w-20 flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
-            liveSession.captionsEnabled ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            liveSession.captionsEnabled ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
           }`}
         >
           <Captions className="h-5 w-5" /><span>Transcript</span>
         </button>
         <ToggleButton label="Share" enabled={isScreenShareEnabled} onClick={() => void toggle('screen')} icon={<MonitorUp className="h-5 w-5" />} inactiveIcon={<MonitorUp className="h-5 w-5" />} />
         <MeetingRecorder roomName={roomName} onError={setMediaError} />
-        <button onClick={onLeave} className="flex min-w-20 flex-col items-center gap-1 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700"><LogOut className="h-5 w-5" /><span>Leave</span></button>
+        <button onClick={handleLeaveMeeting} className="flex min-w-20 flex-col items-center gap-1 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 cursor-pointer"><LogOut className="h-5 w-5" /><span>Leave</span></button>
       </div>
+
+      {/* MEETINGS/pipeline.py Auto Intelligence Extraction Modal */}
+      {isProcessingPipeline && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md animate-fade-in font-sans">
+          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-6">
+            <div className="flex items-center space-x-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="p-2.5 bg-blue-50 dark:bg-blue-950/80 rounded-2xl text-blue-600 dark:text-blue-400">
+                <Sparkles className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white font-sans">
+                  Meeting Intelligence Pipeline Extraction
+                </h3>
+                <p className="text-xs text-slate-400 font-mono">
+                  Simulating MEETINGS/pipeline.py workflow
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {pipelineStages.map((stage, idx) => {
+                const stageNum = idx + 1;
+                const isDone = pipelineStep > stageNum;
+                const isCurrent = pipelineStep === stageNum;
+                return (
+                  <div
+                    key={idx}
+                    className={`p-3 rounded-2xl border transition-all flex items-center justify-between ${
+                      isDone
+                        ? 'bg-emerald-50/60 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-200'
+                        : isCurrent
+                        ? 'bg-blue-50/80 dark:bg-blue-950/60 border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-200 shadow-sm'
+                        : 'bg-slate-50 dark:bg-slate-800/40 border-slate-100 dark:border-slate-800 text-slate-400 opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold font-mono ${
+                        isDone
+                          ? 'bg-emerald-600 text-white'
+                          : isCurrent
+                          ? 'bg-blue-600 text-white animate-bounce'
+                          : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                      }`}>
+                        {stageNum}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold font-sans">{stage.title}</div>
+                        <div className="text-[10px] opacity-80 font-mono">{stage.desc}</div>
+                      </div>
+                    </div>
+
+                    {isDone && <span className="text-xs font-bold font-mono text-emerald-600">DONE</span>}
+                    {isCurrent && <span className="text-xs font-bold font-mono text-blue-600 animate-pulse">RUNNING...</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export const MeetingRoomView: React.FC = () => {
   const { currentUser } = useApp();
-  const [roomName, setRoomName] = useState('team-sync');
+  const [roomName, setRoomName] = useState('');
   const [displayName, setDisplayName] = useState(currentUser.name);
   const [joinDetails, setJoinDetails] = useState<JoinDetails | null>(null);
   const [error, setError] = useState('');
@@ -290,14 +455,55 @@ export const MeetingRoomView: React.FC = () => {
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-8rem)] max-w-2xl items-center p-4 sm:p-6">
-      <form onSubmit={joinRoom} className="w-full rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
-        <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white"><Video className="h-6 w-6" /></div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Join a live meeting</h1>
-        <p className="mt-2 text-sm leading-relaxed text-slate-500">Create a room by entering a new room ID, or enter the ID shared by your team. Your name is shown to every participant.</p>
-        {error && <div className="mt-5 flex gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
-        <label className="mt-6 block text-xs font-bold uppercase tracking-wider text-slate-500">Room ID<input value={roomName} onChange={(event) => setRoomName(event.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))} required maxLength={80} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-indigo-600" placeholder="e.g. q3-planning" /></label>
-        <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-slate-500">Display name<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={80} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-indigo-600" /></label>
-        <button disabled={isJoining || !roomName || !displayName} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60">{isJoining ? 'Creating secure access…' : 'Join meeting'}</button>
+      <form onSubmit={joinRoom} className="w-full rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-xl dark:shadow-2xl dark:shadow-slate-950/50 sm:p-10 transition-all">
+        <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 dark:bg-blue-600 text-white shadow-md shadow-blue-600/30">
+          <Video className="h-6 w-6" />
+        </div>
+        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white font-sans">
+          Join a Live Meeting Room
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+          Enter a <strong className="text-slate-700 dark:text-slate-200">Meeting Room ID</strong> to join or create a session.
+        </p>
+
+        {error && (
+          <div className="mt-5 flex gap-2 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 p-3 text-sm text-rose-700 dark:text-rose-300">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            {error}
+          </div>
+        )}
+        
+        <div className="mt-6 space-y-2">
+          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Meeting Room ID
+          </label>
+          <input
+            value={roomName}
+            onChange={(event) => setRoomName(event.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
+            required
+            maxLength={80}
+            className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-600 dark:focus:border-blue-500 font-mono font-bold placeholder-slate-400 dark:placeholder-slate-500 transition-colors shadow-2xs"
+            placeholder="e.g. 1111"
+          />
+        </div>
+
+        <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          Your Display Name
+          <input
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            required
+            maxLength={80}
+            className="mt-2 w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-600 dark:focus:border-blue-500 font-semibold transition-colors shadow-2xs"
+          />
+        </label>
+
+        <button
+          disabled={isJoining || !roomName || !displayName}
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 dark:bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 dark:hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer shadow-md shadow-blue-600/20 dark:shadow-blue-900/40 transition-all font-sans"
+        >
+          {isJoining ? 'Joining…' : 'Join Meeting'}
+        </button>
       </form>
     </div>
   );

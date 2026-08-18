@@ -85,15 +85,15 @@ export const SettingsView: React.FC = () => {
       
       {/* Toast Notification Alert */}
       {showToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-indigo-600 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center space-x-3 border border-indigo-400/40 animate-fade-in">
+        <div className="fixed bottom-6 right-6 z-50 bg-blue-600 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center space-x-3 border border-blue-400/40 animate-fade-in">
           <div className="p-1.5 bg-white/20 rounded-full">
             <CheckCircle2 className="w-5 h-5 text-white" />
           </div>
           <div>
             <div className="text-xs font-bold font-sans">Settings Saved Successfully</div>
-            <div className="text-[11px] text-indigo-100">Your profile and appearance preferences have been updated.</div>
+            <div className="text-[11px] text-blue-100">Your profile and appearance preferences have been updated.</div>
           </div>
-          <button onClick={() => setShowToast(false)} className="ml-2 text-indigo-200 hover:text-white">
+          <button onClick={() => setShowToast(false)} className="ml-2 text-blue-200 hover:text-white">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -103,7 +103,7 @@ export const SettingsView: React.FC = () => {
       <form onSubmit={handleSave} className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200/80 dark:border-slate-800">
           <div>
-            <div className="flex items-center space-x-1.5 text-xs font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 font-mono mb-1">
+            <div className="flex items-center space-x-1.5 text-xs font-extrabold uppercase tracking-wider text-blue-600 dark:text-blue-400 font-mono mb-1">
               <Sparkles className="w-3.5 h-3.5" />
               <span>ACCOUNT MANAGEMENT</span>
             </div>
@@ -118,7 +118,7 @@ export const SettingsView: React.FC = () => {
           <div className="shrink-0">
             <button
               type="submit"
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-2xl shadow-lg shadow-indigo-600/30 flex items-center space-x-2 transition-all hover:scale-[1.02]"
+              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-2xl shadow-lg shadow-blue-600/30 flex items-center space-x-2 transition-all hover:scale-[1.02]"
             >
               <Save className="w-4 h-4" />
               <span>Save Changes</span>
@@ -130,7 +130,7 @@ export const SettingsView: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-5">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center space-x-3">
-              <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-100 dark:border-indigo-900">
+              <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-100 dark:border-blue-900">
                 <Palette className="w-5 h-5" />
               </div>
               <h2 className="text-base font-extrabold text-slate-900 dark:text-white font-sans">
@@ -139,7 +139,7 @@ export const SettingsView: React.FC = () => {
             </div>
 
             <span className="text-xs font-mono font-bold text-slate-400 uppercase">
-              Current: <span className="text-indigo-600 dark:text-indigo-400">{themeMode}</span>
+              Current: <span className="text-blue-600 dark:text-blue-400">{themeMode}</span>
             </span>
           </div>
 
@@ -147,26 +147,26 @@ export const SettingsView: React.FC = () => {
             Customize how Corporate Brain looks on your device. Choose between light mode, dark mode, or sync with system preferences.
           </p>
 
-          {/* 3 Theme Options Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* 2 Theme Options Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             
             {/* Light Mode */}
             <div
               onClick={() => handleThemeChange('light')}
               className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-center space-x-3.5 ${
                 themeMode === 'light'
-                  ? 'border-2 border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/40 shadow-sm'
+                  ? 'border-2 border-blue-600 bg-blue-50/40 dark:bg-blue-950/40 shadow-sm'
                   : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 hover:border-slate-300'
               }`}
             >
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                themeMode === 'light' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'
+                themeMode === 'light' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'
               }`}>
                 <Sun className="w-5 h-5" />
               </div>
               <div>
                 <div className="text-xs font-bold text-slate-900 dark:text-white">Light Mode</div>
-                <div className="text-[11px] text-slate-400">Clean bright interface</div>
+                <div className="text-[11px] text-slate-400 font-sans">Clean bright interface</div>
               </div>
             </div>
 
@@ -175,38 +175,18 @@ export const SettingsView: React.FC = () => {
               onClick={() => handleThemeChange('dark')}
               className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-center space-x-3.5 ${
                 themeMode === 'dark'
-                  ? 'border-2 border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/40 shadow-sm'
+                  ? 'border-2 border-blue-600 bg-blue-50/40 dark:bg-blue-950/40 shadow-sm'
                   : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 hover:border-slate-300'
               }`}
             >
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                themeMode === 'dark' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'
+                themeMode === 'dark' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'
               }`}>
                 <Moon className="w-5 h-5" />
               </div>
               <div>
                 <div className="text-xs font-bold text-slate-900 dark:text-white">Dark Mode</div>
-                <div className="text-[11px] text-slate-400">High contrast dark theme</div>
-              </div>
-            </div>
-
-            {/* System Default */}
-            <div
-              onClick={() => handleThemeChange('system')}
-              className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-center space-x-3.5 ${
-                themeMode === 'system'
-                  ? 'border-2 border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/40 shadow-sm'
-                  : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 hover:border-slate-300'
-              }`}
-            >
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                themeMode === 'system' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-500'
-              }`}>
-                <Monitor className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-900 dark:text-white">System Default</div>
-                <div className="text-[11px] text-slate-400">Sync with OS settings</div>
+                <div className="text-[11px] text-slate-400 font-sans">High contrast dark theme</div>
               </div>
             </div>
 
@@ -216,7 +196,7 @@ export const SettingsView: React.FC = () => {
         {/* Section 2: Personal Information Card */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
           <div className="flex items-center space-x-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-100 dark:border-indigo-900">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-100 dark:border-blue-900">
               <UserIcon className="w-5 h-5" />
             </div>
             <h2 className="text-base font-extrabold text-slate-900 dark:text-white font-sans">
@@ -231,9 +211,9 @@ export const SettingsView: React.FC = () => {
                 <img
                   src={avatarUrl}
                   alt={name}
-                  className="w-16 h-16 rounded-2xl object-cover ring-2 ring-indigo-500/30"
+                  className="w-16 h-16 rounded-2xl object-cover ring-2 ring-blue-500/30"
                 />
-                <div className="absolute bottom-0 right-0 p-1 bg-indigo-600 text-white rounded-lg shadow-sm">
+                <div className="absolute bottom-0 right-0 p-1 bg-blue-600 text-white rounded-lg shadow-sm">
                   <UserIcon className="w-3 h-3" />
                 </div>
               </div>
@@ -271,59 +251,63 @@ export const SettingsView: React.FC = () => {
           {/* Form Inputs Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             
-            {/* Full Name */}
+            {/* Full Name (Locked) */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                Full Name
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Full Name
+                </label>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Locked</span>
+              </div>
               <div className="relative">
                 <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 <input
                   type="text"
-                  required
+                  disabled
+                  readOnly
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-colors"
+                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 rounded-2xl text-slate-500 dark:text-slate-400 font-semibold cursor-not-allowed select-none"
                 />
               </div>
             </div>
 
-            {/* Position / Title */}
+            {/* Position / Title (Locked) */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                Position / Title
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Position / Title
+                </label>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Locked</span>
+              </div>
               <div className="relative">
                 <Briefcase className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 <input
                   type="text"
-                  required
+                  disabled
+                  readOnly
                   value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-colors"
+                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 rounded-2xl text-slate-500 dark:text-slate-400 font-semibold cursor-not-allowed select-none"
                 />
               </div>
             </div>
 
-            {/* Department */}
+            {/* Department (Locked) */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                Department
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Department
+                </label>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">Locked</span>
+              </div>
               <div className="relative">
                 <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                <select
+                <input
+                  type="text"
+                  disabled
+                  readOnly
                   value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-colors cursor-pointer"
-                >
-                  <option value="Infrastructure">Infrastructure</option>
-                  <option value="Engineering & AI">Engineering & AI</option>
-                  <option value="Product Strategy">Product Strategy</option>
-                  <option value="Security & Compliance">Security & Compliance</option>
-                  <option value="Finance & Operations">Finance & Operations</option>
-                  <option value="Executive Sync">Executive Sync</option>
-                </select>
+                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 rounded-2xl text-slate-500 dark:text-slate-400 font-semibold cursor-not-allowed select-none"
+                />
               </div>
             </div>
 
@@ -339,7 +323,7 @@ export const SettingsView: React.FC = () => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-colors"
+                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
                 />
               </div>
             </div>
@@ -355,7 +339,7 @@ export const SettingsView: React.FC = () => {
                   type="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-colors"
+                  className="w-full pl-10 pr-4 py-2.5 text-xs bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white font-semibold focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
                 />
               </div>
             </div>
@@ -363,76 +347,6 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Section 3: Integrations & Roadmap Card (Task 6.9) */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-5">
-          <div className="flex items-center space-x-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-100 dark:border-indigo-900">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900 dark:text-white font-sans">
-                Integrations & Roadmap
-              </h2>
-              <p className="text-[11px] text-slate-400">
-                What's next for Corporate Brain — visible now, not yet enabled.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-            {/* Google OAuth Login */}
-            <div className="p-4 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30 flex items-start space-x-3.5 opacity-80">
-              <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 flex items-center justify-center shrink-0">
-                <Chrome className="w-5 h-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs font-bold text-slate-900 dark:text-white">Google OAuth Login</div>
-                  <span className="shrink-0 px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold flex items-center gap-1">
-                    <Clock className="w-2.5 h-2.5" /> Coming Soon
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Sign in with your corporate Google Workspace account instead of a demo profile.
-                </p>
-                <button
-                  type="button"
-                  disabled
-                  className="mt-3 px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] font-bold cursor-not-allowed"
-                >
-                  Connect Google Account
-                </button>
-              </div>
-            </div>
-
-            {/* Live Meeting Rooms */}
-            <div className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/40 dark:bg-emerald-950/20 flex items-start space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-900 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                <Video className="w-5 h-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs font-bold text-slate-900 dark:text-white">Live Meeting Rooms</div>
-                  <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
-                    Live
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Join a real-time video room with a shared whiteboard and recording — available now from the "Live Meeting" tab.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('live-meeting')}
-                  className="mt-3 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
-                >
-                  Open Live Meeting
-                </button>
-              </div>
-            </div>
-
-          </div>
-        </div>
       </form>
 
     </div>

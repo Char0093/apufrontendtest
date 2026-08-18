@@ -277,11 +277,11 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
 
         {completedMeetings.length > 0 && (
           <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <Filter className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <Filter className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
             <select
               value={selectedMeetingId}
               onChange={(e) => setSelectedMeetingId(e.target.value)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-indigo-600 shadow-2xs cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-600 shadow-2xs cursor-pointer"
             >
               <option value="ALL">All Meetings (Combined Nodes)</option>
               {completedMeetings.map((mtg) => (
@@ -467,11 +467,11 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
             <div className="space-y-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-1">
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                  <Mail className="w-3 h-3 text-indigo-600 dark:text-indigo-400" /> Email
+                  <Mail className="w-3 h-3 text-blue-600 dark:text-blue-400" /> Email
                 </div>
                 <a
                   href={`mailto:${selectedNode.email || 'contact@corporatebrain.ai'}`}
-                  className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1.5 truncate"
+                  className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1.5 truncate"
                 >
                   <span>{selectedNode.email || 'contact@corporatebrain.ai'}</span>
                   <ExternalLink className="w-3 h-3 shrink-0" />
@@ -484,7 +484,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
                 </div>
                 <a
                   href={`tel:${selectedNode.phone || '+60 12-345 6789'}`}
-                  className="text-xs font-semibold text-slate-800 dark:text-slate-200 hover:text-indigo-600 flex items-center gap-1.5"
+                  className="text-xs font-semibold text-slate-800 dark:text-slate-200 hover:text-blue-600 flex items-center gap-1.5"
                 >
                   <span>{selectedNode.phone || '+60 12-345 6789'}</span>
                 </a>
@@ -504,7 +504,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
                       setMessageText(`Hi ${selectedNode.name.split(' ')[0]}, regarding our recent meeting decision: `);
                     }
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer text-center"
+                  className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer text-center"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
                   <span>Direct Message</span>
@@ -530,7 +530,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-md">
+                <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-md">
                   <User className="w-4 h-4" />
                 </div>
                 <div>
@@ -554,7 +554,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
                 placeholder="Type your direct message here..."
-                className="w-full p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:border-indigo-600 transition-all"
+                className="w-full p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:border-blue-600 transition-all"
               />
             </div>
 
@@ -571,7 +571,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
                 type="button"
                 onClick={handleSendMessage}
                 disabled={!messageText.trim()}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-all cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-all cursor-pointer"
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>Send Message</span>

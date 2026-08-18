@@ -72,7 +72,7 @@ export const PostMeetingUploadModal: React.FC<PostMeetingUploadModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md">
+            <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
@@ -92,9 +92,9 @@ export const PostMeetingUploadModal: React.FC<PostMeetingUploadModalProps> = ({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="p-3 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 space-y-1 text-xs">
-            <span className="font-bold text-indigo-900 dark:text-indigo-300">Scheduled Meeting Context:</span>
-            <p className="text-indigo-700 dark:text-indigo-400">
+          <div className="p-3 rounded-2xl bg-blue-50/60 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/60 space-y-1 text-xs">
+            <span className="font-bold text-blue-900 dark:text-blue-300">Scheduled Meeting Context:</span>
+            <p className="text-blue-700 dark:text-blue-400">
               Project: <span className="font-semibold">{meeting.project}</span> • Participants: <span className="font-semibold">{meeting.participants.join(', ')}</span>
             </p>
           </div>
@@ -110,7 +110,7 @@ export const PostMeetingUploadModal: React.FC<PostMeetingUploadModalProps> = ({
               className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all ${
                 selectedFile
                   ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/30'
-                  : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 hover:border-indigo-500 dark:hover:border-indigo-500'
+                  : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 hover:border-blue-500 dark:hover:border-blue-500'
               }`}
             >
               <input
@@ -133,9 +133,9 @@ export const PostMeetingUploadModal: React.FC<PostMeetingUploadModalProps> = ({
                   </>
                 ) : (
                   <>
-                    <UploadCloud className="w-8 h-8 text-indigo-600 dark:text-indigo-400 mb-1" />
+                    <UploadCloud className="w-8 h-8 text-blue-600 dark:text-blue-400 mb-1" />
                     <p className="text-xs text-slate-700 dark:text-slate-300 font-semibold">
-                      Drag & drop audio file, or <span className="text-indigo-600 dark:text-indigo-400 underline">browse</span>
+                      Drag & drop audio file, or <span className="text-blue-600 dark:text-blue-400 underline">browse</span>
                     </p>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">Supports MP3, WAV, M4A up to 500MB</p>
                   </>
@@ -156,7 +156,7 @@ export const PostMeetingUploadModal: React.FC<PostMeetingUploadModalProps> = ({
             <button
               type="submit"
               disabled={!selectedFile || isProcessing}
-              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold disabled:opacity-50 shadow-md flex items-center gap-2 transition-all cursor-pointer"
+              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50 shadow-md flex items-center gap-2 transition-all cursor-pointer"
             >
               {isProcessing ? (
                 <>

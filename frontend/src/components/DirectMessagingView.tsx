@@ -54,7 +54,7 @@ export const DirectMessagingView: React.FC = () => {
       {/* View Header */}
       <div className="pb-4 border-b border-slate-200 dark:border-slate-800 mb-4 shrink-0">
         <h1 className="text-xl font-bold font-sans text-slate-900 dark:text-white flex items-center space-x-2">
-          <MessageSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+          <MessageSquare className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           <span>Direct Messaging & Team Chat</span>
         </h1>
         <p className="text-xs text-slate-400 mt-0.5">
@@ -75,7 +75,7 @@ export const DirectMessagingView: React.FC = () => {
               <input
                 type="text"
                 placeholder="Search conversations..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-colors"
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
               />
             </div>
           </div>
@@ -90,7 +90,7 @@ export const DirectMessagingView: React.FC = () => {
                   onClick={() => setSelectedChatUserId(emp.id)}
                   className={`p-3 cursor-pointer transition-colors flex items-center space-x-3 ${
                     isSelected
-                      ? 'bg-indigo-50 dark:bg-indigo-950/60 border-l-4 border-indigo-600'
+                      ? 'bg-blue-50 dark:bg-blue-950/60 border-l-4 border-blue-600'
                       : 'hover:bg-slate-100/60 dark:hover:bg-slate-800/40'
                   }`}
                 >
@@ -103,7 +103,7 @@ export const DirectMessagingView: React.FC = () => {
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
-                      <span className={`text-xs font-semibold truncate ${isSelected ? 'text-indigo-900 dark:text-indigo-200 font-bold' : 'text-slate-800 dark:text-slate-200'}`}>
+                      <span className={`text-xs font-semibold truncate ${isSelected ? 'text-blue-900 dark:text-blue-200 font-bold' : 'text-slate-800 dark:text-slate-200'}`}>
                         {emp.name}
                       </span>
                       <span className="text-[10px] text-slate-400">Online</span>
@@ -171,7 +171,7 @@ export const DirectMessagingView: React.FC = () => {
                     <div
                       className={`max-w-md p-3 rounded-2xl text-xs space-y-1 ${
                         isMe
-                          ? 'bg-indigo-600 text-white rounded-br-none shadow-md shadow-indigo-600/20'
+                          ? 'bg-blue-600 text-white rounded-br-none shadow-md shadow-blue-600/20'
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-bl-none border border-slate-200/60 dark:border-slate-700/60'
                       }`}
                     >
@@ -180,7 +180,7 @@ export const DirectMessagingView: React.FC = () => {
 
                     <div className="flex items-center space-x-1 text-[10px] text-slate-400 mt-1 px-1">
                       <span>{msg.timestamp}</span>
-                      {isMe && <CheckCheck className="w-3 h-3 text-indigo-500" />}
+                      {isMe && <CheckCheck className="w-3 h-3 text-blue-500" />}
                     </div>
                   </div>
                 );
@@ -199,9 +199,9 @@ export const DirectMessagingView: React.FC = () => {
                   <button
                     key={m.id}
                     onClick={() => handleAttachMeetingNote(m.title)}
-                    className="p-2 text-left bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs transition-colors flex items-center space-x-2"
+                    className="p-2 text-left bg-white dark:bg-slate-900 hover:bg-blue-50 dark:hover:bg-blue-950/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs transition-colors flex items-center space-x-2"
                   >
-                    <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <FileText className="w-4 h-4 text-blue-500 shrink-0" />
                     <span className="truncate font-semibold text-slate-800 dark:text-slate-200">{m.title}</span>
                   </button>
                 ))}
@@ -214,7 +214,7 @@ export const DirectMessagingView: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
-              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
               title="Attach Meeting Summary"
             >
               <Paperclip className="w-4 h-4" />
@@ -225,13 +225,13 @@ export const DirectMessagingView: React.FC = () => {
               value={messageInput}
               onChange={(e) => setMessageInput(e.target.value)}
               placeholder={`Message ${selectedEmployee.name}...`}
-              className="flex-1 px-4 py-2 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-colors"
+              className="flex-1 px-4 py-2 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
             />
 
             <button
               type="submit"
               disabled={!messageInput.trim()}
-              className="p-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl shadow-md shadow-indigo-600/30 transition-all"
+              className="p-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl shadow-md shadow-blue-600/30 transition-all"
             >
               <Send className="w-4 h-4" />
             </button>

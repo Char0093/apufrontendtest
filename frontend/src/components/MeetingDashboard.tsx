@@ -149,7 +149,7 @@ export const MeetingDashboard: React.FC<MeetingDashboardProps> = ({
       {/* Top Header Banner */}
       <header className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-600 p-0.5 shadow-md flex items-center justify-center text-white shrink-0">
+          <div className="w-12 h-12 rounded-2xl bg-blue-600 p-0.5 shadow-md flex items-center justify-center text-white shrink-0">
             <Brain className="w-6 h-6" />
           </div>
           <div>
@@ -157,7 +157,7 @@ export const MeetingDashboard: React.FC<MeetingDashboardProps> = ({
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white font-sans">
                 Corporate Brain
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800">
+              <span className="px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-semibold border border-blue-200 dark:border-blue-800">
                 AI Meeting Intelligence
               </span>
             </div>
@@ -170,7 +170,7 @@ export const MeetingDashboard: React.FC<MeetingDashboardProps> = ({
         {/* Global Action */}
         <button
           onClick={() => setIsUploadModalOpen(true)}
-          className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
+          className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           <span>New Meeting</span>
@@ -181,7 +181,7 @@ export const MeetingDashboard: React.FC<MeetingDashboardProps> = ({
       <main className="max-w-7xl mx-auto space-y-6">
 
         {/* Welcome Banner Card with Large Numbers */}
-        <div className="bg-gradient-to-r from-sky-50 via-blue-50/40 to-slate-50 dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 border border-sky-100 dark:border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="bg-gradient-to-r from-sky-50 via-blue-50/40 to-slate-50 dark:from-slate-900 dark:via-blue-950/30 dark:to-slate-900 border border-sky-100 dark:border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white font-sans tracking-tight">
               Good evening, Alex.
@@ -193,7 +193,7 @@ export const MeetingDashboard: React.FC<MeetingDashboardProps> = ({
 
           <div className="flex items-center gap-8 border-t md:border-t-0 md:border-l border-sky-200/80 dark:border-slate-800 pt-4 md:pt-0 md:pl-8">
             <div className="text-center md:text-right">
-              <div className="text-3xl md:text-4xl font-extrabold text-indigo-600 dark:text-indigo-400 font-mono tracking-tight">
+              <div className="text-3xl md:text-4xl font-extrabold text-blue-600 dark:text-blue-400 font-mono tracking-tight">
                 {filteredMeetings.length}
               </div>
               <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">Total Meetings</div>
@@ -252,7 +252,7 @@ export const MeetingDashboard: React.FC<MeetingDashboardProps> = ({
               placeholder="Search title, participant, or project..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm placeholder-slate-400 focus:outline-hidden focus:border-indigo-600 transition-all"
+              className="w-full pl-10 pr-4 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm placeholder-slate-400 focus:outline-hidden focus:border-blue-600 transition-all"
             />
           </div>
 
@@ -263,7 +263,7 @@ export const MeetingDashboard: React.FC<MeetingDashboardProps> = ({
               <select
                 value={selectedProject}
                 onChange={(e) => setSelectedProject(e.target.value)}
-                className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium focus:outline-hidden focus:border-indigo-600 transition-all cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium focus:outline-hidden focus:border-blue-600 transition-all cursor-pointer"
               >
                 <option value="ALL">All Projects ({meetings.length})</option>
                 {availableProjects.map((p) => (

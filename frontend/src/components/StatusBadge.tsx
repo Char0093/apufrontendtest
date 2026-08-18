@@ -26,8 +26,8 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
   switch (status) {
     case 'Scheduled':
       return (
-        <span className={`inline-flex items-center rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 ${sizeClasses}`}>
-          <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+        <span className={`inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 ${sizeClasses}`}>
+          <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
           <span>Scheduled</span>
         </span>
       );
@@ -67,8 +67,8 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
 
     case 'Graph':
       return (
-        <span className={`inline-flex items-center rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 ${sizeClasses}`}>
-          <Share2 className="w-3.5 h-3.5 text-indigo-600 animate-pulse" />
+        <span className={`inline-flex items-center rounded-full bg-blue-50 text-blue-800 border border-blue-200 ${sizeClasses}`}>
+          <Share2 className="w-3.5 h-3.5 text-blue-600 animate-pulse" />
           <span>Graph Construction</span>
         </span>
       );

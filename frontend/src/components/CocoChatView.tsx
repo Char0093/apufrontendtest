@@ -1,286 +1,386 @@
-import React, { useState } from 'react';
-import { useApp } from '../context/AppContext';
-import { askCoco } from '../services/api';
-import { 
-  Sparkles, 
-  Send, 
-  Copy, 
-  Check, 
-  ShieldAlert, 
-  Database, 
-  RefreshCw, 
-  Terminal, 
-  Cpu, 
-  FileText,
-  User
+import React, { useRef, useEffect, useState } from 'react';
+import { useApp, CocoChatMessage } from '../context/AppContext';
+import {
+  Sparkles,
+  Send,
+  Bot,
+  User,
+  FileVideo,
+  Clock,
+  Link,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 
-interface ChatMessage {
-  id: string;
-  sender: 'user' | 'coco';
-  text: string;
-  timestamp: string;
-  type?: 'text' | 'table' | 'contradiction_summary';
-  tableData?: { headers: string[]; rows: string[][] };
-  cypherQuery?: string;
+// ── Ask Coco backend — uses Vite proxy to avoid cross-origin issues ─────────
+// Vite proxies: /coco/* → http://localhost:8200/*
+//               /api/*  → http://localhost:8000/*
+
+async function fetchCocoAnswer(query: string): Promise<{ answer: string; citations: CocoChatMessage['citations'] }> {
+  // 1. Try Ask Coco standalone server (via Vite proxy /coco → port 8200)
+  try {
+    const res = await fetch('/coco/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    if (res.ok) return await res.json();
+  } catch {
+    // proxy unreachable, fall through to main backend
+  }
+
+  // 2. Try main FastAPI backend (via Vite proxy /api → port 8000)
+  const res8000 = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+  if (!res8000.ok) throw new Error(`Ask Coco API error: ${res8000.status}`);
+  return await res8000.json();
 }
 
-export const CocoChatView: React.FC = () => {
-  const { contradictions, meetings } = useApp();
+// ── Fallback demo answers ──────────────────────────────────────────────────
 
-  const [inputPrompt, setInputPrompt] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'coco-init-1',
-      sender: 'coco',
-      text: 'Hello Alex. I am Coco, your Corporate Brain assistant. Ask me about indexed meetings, decisions, action items, participants, or contradictions.',
-      timestamp: '10:00 AM'
-    }
-  ]);
-  const [isTyping, setIsTyping] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  // Preset Prompt Pills
-  const presetPrompts = [
-    "Summarize yesterday's sync",
-    "Check contradiction history",
-    "Find action items for Sarah",
-    "Draft Q3 executive briefing"
-  ];
-
-  const handleSendPrompt = (promptText: string) => {
-    if (!promptText.trim()) return;
-
-    const userMsg: ChatMessage = {
-      id: `usr-${Date.now()}`,
-      sender: 'user',
-      text: promptText,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+function getFallbackAnswer(q: string): { answer: string; citations: CocoChatMessage['citations'] } {
+  const ql = q.toLowerCase();
+  if (ql.includes('certificate') || ql.includes('samuel')) {
+    return {
+      answer:
+        "In the meeting 'Build with AI with Md. Samiul Apon.mp4', Samuel clarified that posting on LinkedIn is compulsory to receive the certificate. Participants will receive a certificate for each session and a master certificate upon completing all sessions.",
+      citations: [
+        { filename: 'Build with AI with Md. Samiul Apon.mp4', speaker: 'Samuel', timestamp: '00:00:08', excerpt: "It's wise to post because we made it compulsory." },
+        { filename: 'Build with AI with Md. Samiul Apon.mp4', speaker: 'Samuel', timestamp: '00:03:18', excerpt: "Oh, no. I mean, it's each session we're gonna get certificate." },
+      ],
     };
+  } else if (ql.includes('provider x') || ql.includes('vendor')) {
+    return {
+      answer:
+        'Provider X was evaluated for critical Q3 rollout needs. AI analysis flagged a potential contradiction against the historical decision to freeze all new vendor onboarding until Q4.',
+      citations: [
+        { filename: 'Build with AI with Md. Samiul Apon.mp4', speaker: 'Alex', timestamp: '00:03:18', excerpt: 'Grant an exception to the vendor freeze for CloudSolutions Pro due to its criticality for Q3 rollout.' },
+      ],
+    };
+  }
+  return {
+    answer: `Both the Ask Coco backend (port 8200) and the main backend (port 8000) could not be reached right now.\n\nPlease ensure the servers are running, then try again.\n\n(Demo fallback for: "${q}")`,
+    citations: [],
+  };
+}
 
-    setMessages(prev => [...prev, userMsg]);
-    setInputPrompt('');
+// ── Helper ────────────────────────────────────────────────────────────────
+
+function nowTs(): string {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Safely extract final answer after closing </think> or </thinking> tag */
+function stripThink(text: string): string {
+  if (!text) return '';
+  let clean = text;
+  if (/<\/think>/i.test(clean)) {
+    clean = clean.split(/<\/think>/i).pop() || clean;
+  } else if (/<\/thinking>/i.test(clean)) {
+    clean = clean.split(/<\/thinking>/i).pop() || clean;
+  }
+  return clean.replace(/<\/?(?:think|thinking)>/gi, '').trim();
+}
+
+/** Parses simple markdown (**bold text**) into styled React elements */
+function renderFormattedText(text: string, isUser: boolean) {
+  if (!text) return null;
+  const lines = text.split('\n');
+  return lines.map((line, lineIdx) => {
+    const parts = line.split(/(\*\*.*?\*\*)/g);
+    const formattedLine = parts.map((part, partIdx) => {
+      if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+        const content = part.slice(2, -2);
+        return (
+          <strong
+            key={partIdx}
+            className={`font-bold ${isUser ? 'text-white' : 'text-slate-900 dark:text-white'}`}
+          >
+            {content}
+          </strong>
+        );
+      }
+      return part;
+    });
+
+    return (
+      <React.Fragment key={lineIdx}>
+        {formattedLine}
+        {lineIdx < lines.length - 1 && <br />}
+      </React.Fragment>
+    );
+  });
+}
+
+// ── Component ─────────────────────────────────────────────────────────────
+
+export const CocoChatView: React.FC = () => {
+  const { cocoChatHistory, setCocoChatHistory, clearCocoChatHistory } = useApp();
+
+  const [input, setInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-scroll to bottom when messages update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [cocoChatHistory, isTyping]);
+
+  const handleSend = async (query: string) => {
+    const q = query.trim();
+    if (!q || isTyping) return;
+
+    setInput('');
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
     setIsTyping(true);
 
-    (async () => {
-      const nowTs = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg: CocoChatMessage = {
+      id: `usr-${Date.now()}`,
+      role: 'user',
+      text: q,
+      citations: [],
+      ts: nowTs(),
+    };
+    setCocoChatHistory(prev => [...prev, userMsg]);
 
-      try {
-        const result = await askCoco(promptText);
-
-        const citationRows = result.citations.map(c => [c.filename, c.timestamp, c.speaker, c.excerpt]);
-        const reply: ChatMessage = citationRows.length > 0
-          ? {
-              id: `coco-${Date.now()}`,
-              sender: 'coco',
-              text: result.answer,
-              timestamp: nowTs(),
-              type: 'table',
-              tableData: {
-                headers: ['Meeting', 'Timestamp', 'Speaker', 'Excerpt'],
-                rows: citationRows
-              },
-              cypherQuery: result.cypher
-            }
-          : {
-              id: `coco-${Date.now()}`,
-              sender: 'coco',
-              text: result.answer,
-              timestamp: nowTs(),
-              cypherQuery: result.cypher
-            };
-
-        setMessages(prev => [...prev, reply]);
-      } catch (e) {
-        console.warn('[Corporate Brain] Ask Coco backend unreachable:', e);
-        setMessages(prev => [...prev, {
-          id: `coco-${Date.now()}`,
-          sender: 'coco',
-          text: `**${contradictions.length} contradictions** and ${meetings.length} meetings are indexed locally, but I can't reach the Ask Coco backend right now — is it running?`,
-          timestamp: nowTs()
-        }]);
-      } finally {
-        setIsTyping(false);
-      }
-    })();
+    try {
+      const data = await fetchCocoAnswer(q);
+      const cleanText = stripThink(data.answer ?? '').replace(/^NO_INFO:\s*/i, '');
+      const hasNoInfo = /no information|don't have any info|could not be found|couldn't find/i.test(cleanText);
+      const aiMsg: CocoChatMessage = {
+        id: `ai-${Date.now()}`,
+        role: 'ai',
+        text: cleanText,
+        citations: hasNoInfo ? [] : (data.citations ?? []),
+        ts: nowTs(),
+      };
+      setCocoChatHistory(prev => [...prev, aiMsg]);
+    } catch {
+      console.warn('[Corporate Brain] Ask Coco backend unreachable, using fallback.');
+      const fallback = getFallbackAnswer(q);
+      const aiMsg: CocoChatMessage = {
+        id: `ai-${Date.now()}`,
+        role: 'ai',
+        text: fallback.answer,
+        citations: fallback.citations,
+        ts: nowTs(),
+      };
+      setCocoChatHistory(prev => [...prev, aiMsg]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
-  const copyToClipboard = (id: string, text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend(input);
+    }
   };
+
+  const isEmpty = cocoChatHistory.length === 0;
 
   return (
-    <div className="max-w-[1920px] w-full mx-auto px-8 py-6 h-[calc(100vh-6rem)] animate-fade-in flex flex-col font-sans">
-      
-      {/* Header */}
-      <div className="pb-4 border-b border-slate-200 dark:border-slate-800 mb-4 shrink-0 flex items-center justify-between">
+    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-[1920px] mx-auto w-full font-sans bg-slate-50 dark:bg-slate-950 animate-fade-in">
+
+      {/* Top Bar */}
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 py-4 flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-xl font-bold font-sans text-slate-900 dark:text-white flex items-center space-x-2">
-            <Sparkles className="w-5 h-5 text-violet-500" />
-            <span>Coco AI Assistant (Interactive Chat Agent)</span>
+          <h1 className="text-lg font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+            <Bot className="w-5 h-5 text-blue-600" />
+            Ask Coco
           </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Deterministic, transparent queries over the enterprise meeting graph.
+          <p className="text-xs text-slate-500 mt-0.5">
+            Query your organization's meeting memory — every answer cited to the exact source, speaker, and timestamp
           </p>
         </div>
-
-        <div className="flex items-center space-x-2 text-xs">
-          <span className="px-2.5 py-1 bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-400 rounded-lg font-semibold flex items-center space-x-1">
-            <Cpu className="w-3.5 h-3.5" />
-            <span>Neo4j Template Queries</span>
-          </span>
-        </div>
+        <button
+          onClick={clearCocoChatHistory}
+          className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all cursor-pointer"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          Clear Chat
+        </button>
       </div>
 
-      {/* Chat Container */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex-1 flex flex-col overflow-hidden min-h-0">
-        
-        {/* Preset Prompt Bar */}
-        <div className="p-3 bg-slate-50 dark:bg-slate-850 border-b border-slate-200 dark:border-slate-800 flex items-center space-x-2 overflow-x-auto shrink-0">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">Preset Prompts:</span>
-          {presetPrompts.map((preset) => (
-            <button
-              key={preset}
-              onClick={() => handleSendPrompt(preset)}
-              className="px-3 py-1 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-violet-950/60 text-slate-700 dark:text-slate-300 hover:text-violet-600 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 shrink-0 transition-colors shadow-xs"
+      {/* Messages */}
+      <div
+        className="flex-1 overflow-y-auto flex flex-col gap-5 min-h-0"
+        style={{ padding: '28px 18%', scrollbarWidth: 'thin' }}
+      >
+
+        {/* Empty State */}
+        {isEmpty && !isTyping && (
+          <div className="flex flex-col items-center justify-center h-full text-center py-20">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-950 border border-blue-100 dark:border-blue-900 flex items-center justify-center mb-5 shadow-lg shadow-blue-500/10">
+              <Sparkles className="w-8 h-8 text-blue-500" />
+            </div>
+            <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mb-2">Ask Coco Anything</h2>
+            <p className="text-sm text-slate-500 max-w-sm leading-relaxed">
+              Ask natural language questions across all your processed meetings, transcripts, decisions, and action items.
+            </p>
+          </div>
+        )}
+
+        {/* Message List */}
+        {cocoChatHistory.map(msg => {
+          const isUser = msg.role === 'user';
+          return (
+            <div
+              key={msg.id}
+              className={`flex gap-3 max-w-[88%] ${isUser ? 'self-end flex-row-reverse' : 'self-start'}`}
+              style={{ animation: 'fadeIn 200ms ease-out' }}
             >
-              {preset}
-            </button>
-          ))}
-        </div>
-
-        {/* Message Feed */}
-        <div className="flex-1 p-5 overflow-y-auto space-y-4">
-          {messages.map((msg) => {
-            const isUser = msg.sender === 'user';
-            return (
+              {/* Avatar */}
               <div
-                key={msg.id}
-                className={`flex items-start space-x-3 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}
+                className="flex-shrink-0 flex items-center justify-center text-white font-bold"
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 10,
+                  background: isUser ? '#2563EB' : 'linear-gradient(135deg, #0D9488, #2563EB)',
+                }}
               >
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                  isUser 
-                    ? 'bg-indigo-600 text-white' 
-                    : 'bg-gradient-to-tr from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/20'
-                }`}>
-                  {isUser ? <User className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                </div>
+                {isUser ? <User className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+              </div>
 
-                <div className={`max-w-2xl p-4 rounded-2xl text-xs space-y-3 relative group ${
+              {/* Bubble */}
+              <div
+                className={`text-sm leading-relaxed shadow-sm ${
                   isUser
-                    ? 'bg-indigo-600 text-white rounded-tr-none'
-                    : 'bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 rounded-tl-none border border-slate-200 dark:border-slate-700/80'
-                }`}>
-                  
-                  {/* Message Text */}
-                  <div className="leading-relaxed whitespace-pre-wrap font-sans">
-                    {msg.text}
-                  </div>
+                    ? 'text-white'
+                    : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
+                }`}
+                style={{
+                  borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                  padding: '14px 18px',
+                  background: isUser ? '#2563EB' : undefined,
+                  border: isUser ? 'none' : undefined,
+                }}
+              >
+                <div className="whitespace-pre-wrap">{renderFormattedText(msg.text, isUser)}</div>
 
-                  {/* Structured Table Render */}
-                  {msg.type === 'table' && msg.tableData && (
-                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 mt-2">
-                      <table className="w-full text-left text-[11px]">
-                        <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                          <tr>
-                            {msg.tableData.headers.map((h) => (
-                              <th key={h} className="p-2">{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {msg.tableData.rows.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                              {row.map((cell, cIdx) => (
-                                <td key={cIdx} className="p-2 text-slate-700 dark:text-slate-300">{cell}</td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                {/* Citations */}
+                {!isUser && msg.citations.length > 0 && (
+                  <div className="mt-4">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                      <Link className="w-3 h-3 text-blue-500" />
+                      Sources &amp; Citations ({msg.citations.length})
                     </div>
-                  )}
-
-                  {/* Contradiction Summary Render */}
-                  {msg.type === 'contradiction_summary' && (
-                    <div className="space-y-2 mt-2">
-                      {contradictions.map(c => (
-                        <div key={c.id} className="p-3 bg-rose-50/60 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl">
-                          <div className="font-bold text-rose-600 dark:text-rose-400">{c.title}</div>
-                          <p className="text-[11px] text-slate-600 dark:text-slate-400">{c.recommendation}</p>
+                    <div className="space-y-2">
+                      {msg.citations.map((c, idx) => (
+                        <div
+                          key={idx}
+                          className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 rounded-xl p-3 transition-all hover:bg-blue-50/40 dark:hover:bg-blue-950/20"
+                        >
+                          <div className="flex items-center gap-1.5 text-blue-700 dark:text-blue-400 font-semibold text-xs mb-1.5">
+                            <FileVideo className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">{c.filename || 'Meeting File'}</span>
+                          </div>
+                          <div className="flex items-center gap-3 text-slate-500 text-[11px] mb-1">
+                            <span className="flex items-center gap-1">
+                              <User className="w-3 h-3" />
+                              {c.speaker || 'Speaker'}
+                            </span>
+                            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 rounded-md font-semibold text-[10px]">
+                              <Clock className="w-2.5 h-2.5" />
+                              {c.timestamp || '00:00:00'}
+                            </span>
+                          </div>
+                          {c.excerpt && (
+                            <div className="text-slate-500 dark:text-slate-400 italic text-[11.5px] border-l-2 border-slate-300 dark:border-slate-600 pl-2 mt-1.5">
+                              "{c.excerpt}"
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
-                  )}
-
-                  {/* Generated Cypher Graph Query Preview */}
-                  {msg.cypherQuery && (
-                    <div className="p-3 bg-slate-900 text-slate-200 rounded-xl font-mono text-[10px] space-y-1 border border-slate-800">
-                      <div className="flex items-center space-x-1 text-violet-400 font-bold">
-                        <Terminal className="w-3 h-3" />
-                        <span>Generated Neo4j Cypher Query</span>
-                      </div>
-                      <p className="text-slate-400">{msg.cypherQuery}</p>
-                    </div>
-                  )}
-
-                  {/* Timestamp & Copy Button */}
-                  <div className="flex items-center justify-between text-[10px] opacity-75 pt-1">
-                    <span>{msg.timestamp}</span>
-
-                    {!isUser && (
-                      <button
-                        onClick={() => copyToClipboard(msg.id, msg.text)}
-                        className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors text-slate-400 hover:text-slate-600"
-                        title="Copy structured response"
-                      >
-                        {copiedId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
-                    )}
                   </div>
+                )}
+
+                {/* Timestamp */}
+                <div className={`text-[10px] mt-2 ${isUser ? 'text-blue-200 text-right' : 'text-slate-400'}`}>
+                  {msg.ts}
                 </div>
               </div>
-            );
-          })}
+            </div>
+          );
+        })}
 
-          {/* Typing Indicator */}
-          {isTyping && (
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-xl bg-violet-600 text-white flex items-center justify-center">
-                <Sparkles className="w-4 h-4 animate-spin" />
-              </div>
-              <div className="p-3 bg-slate-100 dark:bg-slate-800 rounded-2xl text-xs text-slate-500 flex items-center space-x-2">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet-500" />
-                <span>Synthesizing enterprise knowledge graph...</span>
+        {/* Typing indicator */}
+        {isTyping && (
+          <div className="flex gap-3 self-start">
+            <div
+              className="flex items-center justify-center flex-shrink-0"
+              style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(135deg, #0D9488, #2563EB)' }}
+            >
+              <Sparkles className="w-4 h-4 text-white" />
+            </div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 shadow-sm" style={{ borderBottomLeftRadius: 4 }}>
+              <div className="flex items-center gap-2 text-slate-400 text-xs">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                <span>Coco is searching organizational memory...</span>
+                <span className="flex gap-1">
+                  {[0, 1, 2].map(i => (
+                    <span
+                      key={i}
+                      className="w-1.5 h-1.5 rounded-full bg-blue-500 opacity-40 animate-bounce"
+                      style={{ animationDelay: `${i * 0.15}s` }}
+                    />
+                  ))}
+                </span>
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Input Bar */}
-        <form onSubmit={(e) => { e.preventDefault(); handleSendPrompt(inputPrompt); }} className="p-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center space-x-2">
-          <input
-            type="text"
-            value={inputPrompt}
-            onChange={(e) => setInputPrompt(e.target.value)}
-            placeholder="Ask Coco AI about meeting decisions, policy contradictions, or action items..."
-            className="flex-1 px-4 py-2.5 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-violet-500 focus:outline-none transition-colors"
-          />
-
-          <button
-            type="submit"
-            disabled={!inputPrompt.trim()}
-            className="px-4 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-xs font-semibold rounded-xl shadow-md shadow-violet-600/30 transition-all flex items-center space-x-1.5 disabled:opacity-50"
-          >
-            <span>Ask Coco</span>
-            <Send className="w-3.5 h-3.5" />
-          </button>
-        </form>
-
+        <div ref={messagesEndRef} />
       </div>
 
+      {/* Input Area */}
+      <div
+        className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shrink-0"
+        style={{ padding: '16px 18%' }}
+      >
+        <div
+          className={`flex gap-2.5 items-end transition-all rounded-xl px-3.5 py-2.5 border ${
+            input
+              ? 'border-blue-600 dark:border-blue-500 bg-white dark:bg-slate-800 shadow-md shadow-blue-500/10'
+              : 'border-slate-300 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/60'
+          }`}
+        >
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => {
+              setInput(e.target.value);
+              e.target.style.height = 'auto';
+              e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask Coco about any meeting, decision, or speaker..."
+            rows={1}
+            className="flex-1 bg-transparent border-0 outline-none resize-none text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 leading-relaxed font-sans"
+            style={{ maxHeight: 120, scrollbarWidth: 'none' }}
+          />
+          <button
+            onClick={() => handleSend(input)}
+            disabled={!input.trim() || isTyping}
+            className="flex items-center justify-center flex-shrink-0 transition-all rounded-xl w-9 h-9 border-0 cursor-pointer disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-500 dark:bg-blue-600 dark:hover:bg-blue-500 text-white disabled:bg-slate-200 dark:disabled:bg-slate-800/80 disabled:text-slate-400 dark:disabled:text-slate-600 shadow-md shadow-blue-600/20"
+          >
+            {isTyping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          </button>
+        </div>
+        <p className="text-center text-[11.5px] text-slate-400 dark:text-slate-500 mt-2">
+          Answers are synthesized by Groq from your organization's meeting records. Always verify critical decisions.
+        </p>
+      </div>
     </div>
   );
 };

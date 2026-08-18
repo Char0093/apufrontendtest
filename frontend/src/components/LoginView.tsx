@@ -128,7 +128,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 relative overflow-hidden font-sans">
       {/* Background Decorative Ambient Glows */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-blue-600/15 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
 
       {/* Toast Alert */}
@@ -142,8 +142,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
       <div className="max-w-md w-full space-y-6 relative z-10">
         {/* Branding & Logo Header */}
         <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 backdrop-blur-md shadow-md">
-            <Brain className="w-6 h-6 text-indigo-400" />
+          <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-blue-500/10 border border-blue-500/20 backdrop-blur-md shadow-md">
+            <Brain className="w-6 h-6 text-blue-400" />
             <span className="text-sm font-bold tracking-tight text-white">Corporate Brain Enterprise</span>
           </div>
           
@@ -181,7 +181,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
                     if (errorMsg) setErrorMsg('');
                   }}
                   placeholder="e.g. alice.chen@corporatebrain.ai"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                   required
                 />
               </div>
@@ -199,7 +199,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your SSO password"
-                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder-slate-500 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                   required
                 />
                 <button
@@ -220,7 +220,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer"
+                  className="rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer"
                 />
                 <span>Remember Me</span>
               </label>
@@ -228,7 +228,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
               <button
                 type="button"
                 onClick={handleForgotPassword}
-                className="text-indigo-400 hover:text-indigo-300 font-semibold hover:underline cursor-pointer"
+                className="text-blue-400 hover:text-blue-300 font-semibold hover:underline cursor-pointer"
               >
                 Forgot Password?
               </button>
@@ -237,7 +237,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
             {/* Primary Sign In Button */}
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 transition-all cursor-pointer hover:scale-[1.01]"
+              className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition-all cursor-pointer hover:scale-[1.01]"
             >
               <Lock className="w-3.5 h-3.5" />
               <span>Sign In with SSO</span>
@@ -253,7 +253,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
               className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-950/60 hover:bg-slate-950 border border-slate-800/80 text-xs font-semibold text-slate-300 hover:text-white transition-all cursor-pointer"
             >
               <div className="flex items-center gap-2">
-                <Key className="w-3.5 h-3.5 text-indigo-400" />
+                <Key className="w-3.5 h-3.5 text-blue-400" />
                 <span>Need Demo Access? Select Test Account</span>
               </div>
               {isDemoOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
@@ -268,22 +268,22 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
                       key={user.id}
                       type="button"
                       onClick={() => handleQuickLoginPill(user)}
-                      className="p-2.5 rounded-xl bg-slate-950/80 hover:bg-indigo-950/40 border border-slate-800 hover:border-indigo-500/50 flex items-center justify-between text-left transition-all cursor-pointer group"
+                      className="p-2.5 rounded-xl bg-slate-950/80 hover:bg-blue-950/40 border border-slate-800 hover:border-blue-500/50 flex items-center justify-between text-left transition-all cursor-pointer group"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <img
                           src={user.avatarUrl}
                           alt={user.name}
-                          className="w-8 h-8 rounded-lg object-cover border border-indigo-500/30 shrink-0"
+                          className="w-8 h-8 rounded-lg object-cover border border-blue-500/30 shrink-0"
                         />
                         <div className="min-w-0">
-                          <h4 className="text-xs font-bold text-white group-hover:text-indigo-300 truncate">
+                          <h4 className="text-xs font-bold text-white group-hover:text-blue-300 truncate">
                             {user.name}
                           </h4>
                           <p className="text-[10px] text-slate-400 truncate">{user.title}</p>
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 text-[10px] font-mono shrink-0">
+                      <span className="px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 text-[10px] font-mono shrink-0">
                         {user.department}
                       </span>
                     </button>

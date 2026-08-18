@@ -23,7 +23,7 @@ const MainAppContent: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-indigo-600 selection:text-white transition-colors duration-200">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-blue-600 selection:text-white transition-colors duration-200">
       
       {/* Top Navigation Header */}
       <Header />
@@ -42,7 +42,10 @@ const MainAppContent: React.FC = () => {
             <MeetingRoomView />
           </div>
           {activeTab === 'directory' && <EmployeeDirectoryView />}
-          {activeTab === 'coco' && <CocoChatView />}
+          {/* Keep Coco mounted so chat history is preserved on tab switch */}
+          <div className={activeTab === 'coco' ? 'block' : 'hidden'}>
+            <CocoChatView />
+          </div>
           {activeTab === 'settings' && <SettingsView />}
           {activeTab === 'messages' && <DirectMessagingView />}
         </main>

@@ -1,22 +1,19 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
-  Sparkles, 
   Clock, 
   CheckCircle2, 
   Search, 
   Filter, 
   Calendar, 
-  FileAudio, 
   ArrowRight,
-  UserCheck
+  Upload
 } from 'lucide-react';
 
 export const DashboardView: React.FC = () => {
   const { 
     meetings, 
     currentUser, 
-    personalDashboard,
     setActiveTab,
     processAudioForMeeting
   } = useApp();
@@ -36,12 +33,6 @@ export const DashboardView: React.FC = () => {
     });
   }, [meetings, currentUser]);
 
-  // Filtered lists for upcoming and completed
-  // Real (non-demo) processing genuinely takes time and passes through
-  // every one of these statuses in turn — a filter that only recognized
-  // 'Preprocessing' made a meeting vanish from the dashboard the moment
-  // real progress crossed into 'ASR'/'LLM'/'Graph' (or hit 'Retrying'),
-  // since it no longer matched "upcoming" but wasn't 'Completed' either.
   const upcomingMeetings = useMemo(() => {
     return currentUserMeetings.filter(m => m.status !== 'Completed');
   }, [currentUserMeetings]);
@@ -56,7 +47,7 @@ export const DashboardView: React.FC = () => {
       const matchesSearch = !searchQuery.trim() || 
         m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         m.project.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (m.participants && m.participants.some(p => p.toLowerCase().includes(searchQuery.toLowerCase())));
+        (m.participants && m.participants.some(p => (typeof p === 'string' ? p : (p as any).name).toLowerCase().includes(searchQuery.toLowerCase())));
       return matchesProject && matchesSearch;
     });
   }, [upcomingMeetings, projectFilter, searchQuery]);
@@ -67,7 +58,7 @@ export const DashboardView: React.FC = () => {
       const matchesSearch = !searchQuery.trim() || 
         m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         m.project.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (m.participants && m.participants.some(p => p.toLowerCase().includes(searchQuery.toLowerCase())));
+        (m.participants && m.participants.some(p => (typeof p === 'string' ? p : (p as any).name).toLowerCase().includes(searchQuery.toLowerCase())));
       return matchesProject && matchesSearch;
     });
   }, [completedMeetings, projectFilter, searchQuery]);
@@ -75,122 +66,47 @@ export const DashboardView: React.FC = () => {
   return (
     <div className="max-w-[1920px] w-full mx-auto px-8 py-6 space-y-6 font-sans animate-fade-in pb-16">
       
-      {/* Sub-Header Row - Clean without secondary logo or duplicate buttons */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200/80 dark:border-slate-800">
+      {/* Clean Simplified Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80 dark:border-slate-800">
         <div>
-          <div className="flex items-center space-x-2.5">
-            <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white font-sans tracking-tight">
-              Dashboard Overview
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800">
-              Personalized Sync
+          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white font-sans tracking-tight flex items-center gap-2">
+            <span>Welcome back, {currentUser.name.split(' ')[0]}</span>
+            <span className="px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 text-xs font-bold border border-blue-200 dark:border-blue-800">
+              {currentUser.role}
+            </span>
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">
+            Personalized dashboard showing scheduled meetings and indexed decision records for your account.
+          </p>
+        </div>
+
+        {/* Quick Summary Badges */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 rounded-2xl flex items-center space-x-2">
+            <Clock className="w-4 h-4 text-amber-500" />
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+              {upcomingMeetings.length} Upcoming
             </span>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-            Real-time meeting intelligence, ASR speech extraction & decision tracking for <span className="font-bold text-slate-700 dark:text-slate-300">{currentUser.name}</span>
-          </p>
-        </div>
-      </div>
-
-      {/* User Accountability Summary Card */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="space-y-1.5">
-          <div className="flex items-center space-x-2 text-xs font-bold text-indigo-600 dark:text-indigo-400">
-            <UserCheck className="w-4 h-4" />
-            <span>Active Account: {currentUser.name} ({currentUser.role})</span>
-          </div>
-          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white font-sans">
-            Welcome back, {currentUser.name.split(' ')[0]}.
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-            Viewing {currentUserMeetings.length} meetings assigned to your corporate profile.
-          </p>
-        </div>
-
-        {/* Personal graph metrics */}
-        <div className="flex items-center gap-6 pt-4 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 dark:border-slate-800 md:pl-8 shrink-0">
-          <div className="text-center">
-            <div className="text-3xl font-extrabold text-indigo-600 dark:text-indigo-400 font-mono">
-              {currentUserMeetings.length}
-            </div>
-            <div className="text-xs font-semibold text-slate-400 mt-0.5">Your Meetings</div>
-          </div>
-
-          <div className="text-center">
-            <div className="text-3xl font-extrabold text-amber-500 font-mono">
-              {upcomingMeetings.length}
-            </div>
-            <div className="text-xs font-semibold text-slate-400 mt-0.5">Upcoming</div>
-          </div>
-
-          <div className="text-center">
-            <div className="text-3xl font-extrabold text-emerald-500 font-mono">
-              {completedMeetings.length}
-            </div>
-            <div className="text-xs font-semibold text-slate-400 mt-0.5">Completed</div>
-          </div>
-
-          <div className="text-center">
-            <div className="text-3xl font-extrabold text-rose-500 font-mono">
-              {personalDashboard?.flags.length ?? 0}
-            </div>
-            <div className="text-xs font-semibold text-slate-400 mt-0.5">Your Flags</div>
-          </div>
-
-          <div className="text-center">
-            <div className="text-3xl font-extrabold text-violet-500 font-mono">
-              {personalDashboard?.action_items.length ?? 0}
-            </div>
-            <div className="text-xs font-semibold text-slate-400 mt-0.5">Your Tasks</div>
+          <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 rounded-2xl flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+              {completedMeetings.length} Completed
+            </span>
           </div>
         </div>
       </div>
 
-      {/* 2 Metric Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-        
-        {/* Card 1: Upcoming Meetings */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 shadow-xs flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 border border-amber-100 dark:border-amber-900/40">
-            <Clock className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-              {upcomingMeetings.length}
-            </div>
-            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              Upcoming Scheduled Meetings
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2: Completed Meetings */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 shadow-xs flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-100 dark:border-emerald-900/40">
-            <CheckCircle2 className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono">
-              {completedMeetings.length}
-            </div>
-            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              Completed & Indexed Meetings
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Search & Filter Bar Row */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+      {/* Streamlined Search & Filter Bar */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-900/50 p-2 rounded-2xl border border-slate-200/80 dark:border-slate-800">
         <div className="relative w-full sm:w-96">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search your title, participant, or project..."
-            className="w-full pl-10 pr-4 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+            placeholder="Search title, participant, or project..."
+            className="w-full pl-10 pr-4 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
           />
         </div>
 
@@ -199,7 +115,7 @@ export const DashboardView: React.FC = () => {
           <select
             value={projectFilter}
             onChange={(e) => setProjectFilter(e.target.value)}
-            className="px-3.5 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            className="px-3.5 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
           >
             <option value="ALL">All Projects ({currentUserMeetings.length})</option>
             <option value="Design Systems">Design Systems</option>
@@ -213,132 +129,77 @@ export const DashboardView: React.FC = () => {
       </div>
 
       {/* Section 1: Upcoming Meetings */}
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-              <Clock className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900 dark:text-white font-sans flex items-center space-x-2">
-                <span>Upcoming Meetings</span>
-              </h3>
-              <p className="text-[11px] text-slate-400">Scheduled or awaiting audio recording</p>
-            </div>
-          </div>
-
-          <span className="px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 text-xs font-bold border border-amber-200 dark:border-amber-800">
-            {filteredUpcoming.length} Meetings
+          <h3 className="text-base font-extrabold text-slate-900 dark:text-white font-sans flex items-center space-x-2">
+            <Clock className="w-4 h-4 text-amber-500" />
+            <span>Upcoming Scheduled Meetings</span>
+          </h3>
+          <span className="text-xs text-slate-400 font-semibold">
+            {filteredUpcoming.length} items
           </span>
         </div>
 
         {filteredUpcoming.length === 0 ? (
-          <div className="p-8 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl space-y-2">
-            <Clock className="w-8 h-8 text-slate-400 mx-auto" />
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-              No upcoming meetings scheduled for {currentUser.name}
-            </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Click "+ Schedule Meeting" in the top header to invite team members.
+          <div className="p-6 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-1">
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              No upcoming meetings scheduled for {currentUser.name}.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 w-full">
+          <div className="space-y-3">
             {filteredUpcoming.map((mtg) => (
               <div
                 key={mtg.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 shadow-xs hover:shadow-md transition-all space-y-4"
+                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-2xs hover:border-blue-300 dark:hover:border-blue-700 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
               >
-                <div className="flex items-center justify-between">
-                  <span className="px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold border border-indigo-100 dark:border-indigo-900">
-                    {mtg.project}
-                  </span>
+                <div className="space-y-1 min-w-0">
+                  <div className="flex items-center space-x-2">
+                    <span className="px-2.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-[11px] font-bold border border-blue-100 dark:border-blue-900">
+                      {mtg.project}
+                    </span>
+                    <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {mtg.dateTime}
+                    </span>
+                  </div>
 
-                  <span className="px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-xs font-bold border border-amber-200 dark:border-amber-800 flex items-center space-x-1">
-                    <Clock className="w-3 h-3 text-amber-500" />
-                    <span>{mtg.status || 'Pending'}</span>
-                  </span>
-                </div>
-
-                <div className="space-y-1.5">
-                  <h4 className="text-base font-bold text-slate-900 dark:text-white font-sans line-clamp-1">
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white font-sans truncate">
                     {mtg.title}
                   </h4>
-                  {mtg.audioFileName && (
-                    <div className="flex items-center space-x-1.5 text-xs text-slate-400 font-mono">
-                      <FileAudio className="w-3.5 h-3.5 text-indigo-500" />
-                      <span>{mtg.audioFileName} ({mtg.fileSize || '22.4 MB'})</span>
-                    </div>
-                  )}
-                </div>
 
-                <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 dark:text-slate-400 font-medium">
-                  <span className="flex items-center space-x-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                    <span>{mtg.dateTime}</span>
-                  </span>
-                  {mtg.duration && (
-                    <span className="flex items-center space-x-1.5">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{mtg.duration}</span>
+                  <div className="flex items-center space-x-2 text-[11px] text-slate-500">
+                    <span className="font-semibold text-slate-400">Participants:</span>
+                    <span>
+                      {mtg.participants && mtg.participants.map(p => typeof p === 'string' ? p : (p as any).name).join(', ')}
                     </span>
-                  )}
+                  </div>
                 </div>
 
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 font-mono">
-                      PARTICIPANTS
+                <div className="shrink-0 flex items-center gap-3">
+                  {(['Preprocessing', 'ASR', 'LLM', 'Graph', 'Retrying'] as string[]).includes(mtg.status) ? (
+                    <div className="flex items-center space-x-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 animate-pulse">
+                      <span className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+                      <span>Processing Audio...</span>
                     </div>
-
-                    {(['Preprocessing', 'ASR', 'LLM', 'Graph', 'Retrying'] as string[]).includes(mtg.status) ? (
-                      <div className="flex items-center space-x-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 animate-pulse">
-                        <span className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></span>
-                        <span>{mtg.status === 'Retrying' ? 'Retrying after an error...' : 'Processing ASR & Extracting Decisions...'}</span>
-                      </div>
-                    ) : mtg.status === 'Failed' ? (
-                      <label className="cursor-pointer px-3 py-1 bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900 border border-rose-200 dark:border-rose-800 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all shadow-2xs">
-                        <input
-                          type="file"
-                          accept="audio/*,video/mp4,.mp4"
-                          className="hidden"
-                          onChange={(e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              processAudioForMeeting(mtg.id, e.target.files[0]);
-                            }
-                          }}
-                        />
-                        <span>Processing Failed — Retry Upload</span>
-                      </label>
-                    ) : (
-                      <label className="cursor-pointer px-3 py-1 bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all shadow-2xs">
-                        <input
-                          type="file"
-                          accept="audio/*,video/mp4,.mp4"
-                          className="hidden"
-                          onChange={(e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              processAudioForMeeting(mtg.id, e.target.files[0]);
-                            } else {
-                              processAudioForMeeting(mtg.id, { name: `${mtg.project.toLowerCase().replace(/\s+/g, '_')}_recording.mp3`, size: 19200000 });
-                            }
-                          }}
-                        />
-                        <span>Upload Audio Recording</span>
-                      </label>
-                    )}
-                  </div>
-
-                  <div className="flex flex-wrap gap-1.5">
-                    {mtg.participants && mtg.participants.map((p, idx) => (
-                      <span
-                        key={idx}
-                        className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-medium"
-                      >
-                        {typeof p === 'string' ? p : (p as any).name}
-                      </span>
-                    ))}
-                  </div>
+                  ) : (
+                    <label className="cursor-pointer px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all shadow-xs">
+                      <input
+                        type="file"
+                        accept="audio/*,video/mp4,.mp4"
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            processAudioForMeeting(mtg.id, e.target.files[0]);
+                          } else {
+                            processAudioForMeeting(mtg.id, { name: `${mtg.project.toLowerCase().replace(/\s+/g, '_')}_recording.mp3`, size: 19200000 });
+                          }
+                        }}
+                      />
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Upload Recording</span>
+                    </label>
+                  )}
                 </div>
               </div>
             ))}
@@ -347,58 +208,47 @@ export const DashboardView: React.FC = () => {
       </div>
 
       {/* Section 2: Completed Meetings */}
-      <div className="space-y-4 pt-4">
+      <div className="space-y-3 pt-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900 dark:text-white font-sans flex items-center space-x-2">
-                <span>Completed Meetings</span>
-              </h3>
-              <p className="text-[11px] text-slate-400">Indexed in Corporate Brain with full ASR transcript & decision graph</p>
-            </div>
-          </div>
+          <h3 className="text-base font-extrabold text-slate-900 dark:text-white font-sans flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+            <span>Completed & Indexed Meetings</span>
+          </h3>
 
           <button
             onClick={() => setActiveTab('meetings')}
-            className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-1 cursor-pointer"
+            className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center space-x-1 cursor-pointer"
           >
-            <span>View All Intelligence Cards</span>
+            <span>View All Cards</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
         {filteredCompleted.length === 0 ? (
-          <div className="p-8 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl space-y-2">
-            <CheckCircle2 className="w-8 h-8 text-slate-400 mx-auto" />
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-              No completed meetings recorded for {currentUser.name}
-            </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Upload audio recordings to complete scheduled meetings.
+          <div className="p-6 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-1">
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              No completed meetings recorded for {currentUser.name}.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 w-full">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredCompleted.map((mtg) => (
               <div
                 key={mtg.id}
                 onClick={() => setActiveTab('meetings')}
-                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 shadow-xs hover:shadow-md hover:border-indigo-500 transition-all cursor-pointer space-y-3.5 flex flex-col justify-between group"
+                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-2xs hover:shadow-sm hover:border-blue-500 transition-all cursor-pointer space-y-3 flex flex-col justify-between group"
               >
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="px-2.5 py-0.5 rounded-full bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 text-xs font-bold border border-sky-200 dark:border-sky-800">
+                    <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-bold">
                       {mtg.project}
                     </span>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold border border-emerald-200 dark:border-emerald-800">
-                      Ready
+                    <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                      Completed
                     </span>
                   </div>
 
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 transition-colors line-clamp-2">
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors line-clamp-1">
                     {mtg.title}
                   </h4>
 
@@ -407,7 +257,7 @@ export const DashboardView: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-indigo-600 dark:text-indigo-400 font-semibold">
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-blue-600 dark:text-blue-400 font-semibold">
                   <span>{mtg.decisions?.length || 0} Decisions • {mtg.actionItems?.length || 0} Tasks</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>

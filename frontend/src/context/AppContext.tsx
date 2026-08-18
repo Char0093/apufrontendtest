@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
+import React, { createContext, useContext, useState, useMemo, useEffect, useRef } from 'react';
 import {
   User,
   UserProfile,
@@ -30,8 +30,8 @@ function ensureCurrentUserIsParticipant(meeting: Meeting, currentUserName: strin
 const initialEmployees: Employee[] = [
   {
     id: 'emp-0',
-    name: 'Alex Mercer',
-    email: 'alex.mercer@corpbrain.ai',
+    name: 'Thim Yee Song',
+    email: 'thim.yeesong@corpbrain.ai',
     phone: '+1 (555) 123-4567',
     department: 'Product & Executive',
     role: 'VP of Product',
@@ -42,10 +42,10 @@ const initialEmployees: Employee[] = [
   },
   {
     id: 'emp-1',
-    name: 'Sarah Jenkins',
-    email: 'sarah.jenkins@corpbrain.ai',
+    name: 'Duncan',
+    email: 'duncan@corpbrain.ai',
     phone: '+1 (555) 234-5678',
-    department: 'Engineering',
+    department: 'Core Systems',
     role: 'VP of Engineering',
     avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
     isOnline: true,
@@ -54,8 +54,8 @@ const initialEmployees: Employee[] = [
   },
   {
     id: 'emp-2',
-    name: 'Marcus Vance',
-    email: 'marcus.vance@corpbrain.ai',
+    name: 'Kam Xin Le',
+    email: 'kam.xinle@corpbrain.ai',
     phone: '+1 (555) 345-6789',
     department: 'Product Strategy',
     role: 'Head of Product',
@@ -66,39 +66,15 @@ const initialEmployees: Employee[] = [
   },
   {
     id: 'emp-3',
-    name: 'Elena Rostova',
-    email: 'elena.rostova@corpbrain.ai',
+    name: 'Yap En Yu',
+    email: 'yap.enyu@corpbrain.ai',
     phone: '+1 (555) 456-7890',
-    department: 'Finance & Operations',
+    department: 'Executive Ops',
     role: 'Chief Financial Officer',
     avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
     isOnline: false,
     location: 'Chicago, IL',
     bio: 'Budget allocation, enterprise compliance, and resource governance.'
-  },
-  {
-    id: 'emp-4',
-    name: 'David Chen',
-    email: 'david.chen@corpbrain.ai',
-    phone: '+1 (555) 567-8901',
-    department: 'Engineering',
-    role: 'Principal AI Architect',
-    avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-    isOnline: true,
-    location: 'Seattle, WA',
-    bio: 'Specializing in LLM fine-tuning, RAG architecture, and anomaly detection.'
-  },
-  {
-    id: 'emp-5',
-    name: 'Amanda Brooks',
-    email: 'amanda.brooks@corpbrain.ai',
-    phone: '+1 (555) 678-9012',
-    department: 'Legal & Compliance',
-    role: 'General Counsel',
-    avatarUrl: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80',
-    isOnline: true,
-    location: 'Washington, D.C.',
-    bio: 'Regulatory compliance, policy audit trails, and contradiction resolution.'
   }
 ];
 
@@ -208,10 +184,10 @@ const initialMeetings: Meeting[] = [
     dateTime: '2026-08-08 14:00',
     timeRange: '14:00 - 15:30 EST',
     department: 'Engineering & Finance',
-    participants: ['Alex Mercer', 'Sarah Jenkins', 'Elena Rostova'],
+    participants: ['Thim Yee Song', 'Duncan', 'Yap En Yu'],
     status: 'Completed',
     duration: '45 mins',
-    summary: 'The executive committee discussed cloud GPU cluster scaling for the upcoming RAG 2.0 release. CFO Elena highlighted tight budget boundaries for Q3 ($180k max), while Sarah presented hardware cost estimates ($240k). AI anomaly detection flagged a critical budget contradiction across recorded policy limits.',
+    summary: 'The executive committee discussed cloud GPU cluster scaling for the upcoming RAG 2.0 release. CFO Yap En Yu highlighted tight budget boundaries for Q3 ($180k max), while Duncan presented hardware cost estimates ($240k). AI anomaly detection flagged a critical budget contradiction across recorded policy limits.',
     decisions: [
       {
         id: 'dec-1',
@@ -235,9 +211,9 @@ const initialMeetings: Meeting[] = [
     actionItems: [initialActionItems[4], initialActionItems[0], initialActionItems[1]],
     contradictions: [initialContradictions[0]],
     transcript: [
-      { id: 't1', speaker: 'Alex Mercer', time: '00:02', text: 'Welcome everyone. Today we are addressing infrastructure capacity for the upcoming Corporate Brain LLM rollout.', sentiment: 'positive' },
-      { id: 't2', speaker: 'Sarah Jenkins', time: '02:15', text: 'Our current 8-node GPU cluster is reaching 88% peak memory utilization during business hours. We need to provision $240,000 for additional capacity.', sentiment: 'action' },
-      { id: 't3', speaker: 'Elena Rostova', time: '04:40', text: 'Hold on, Sarah. In our July 15 budget meeting, we set a strict Q3 cloud infrastructure ceiling of $180,000. We cannot exceed that limit without board signoff.', sentiment: 'conflict' }
+      { id: 't1', speaker: 'Thim Yee Song', time: '00:02', text: 'Welcome everyone. Today we are addressing infrastructure capacity for the upcoming Corporate Brain LLM rollout.', sentiment: 'positive' },
+      { id: 't2', speaker: 'Duncan', time: '02:15', text: 'Our current 8-node GPU cluster is reaching 88% peak memory utilization during business hours. We need to provision $240,000 for additional capacity.', sentiment: 'action' },
+      { id: 't3', speaker: 'Yap En Yu', time: '04:40', text: 'Hold on, Duncan. In our July 15 budget meeting, we set a strict Q3 cloud infrastructure ceiling of $180,000. We cannot exceed that limit without board signoff.', sentiment: 'conflict' }
     ]
   },
   {
@@ -247,10 +223,10 @@ const initialMeetings: Meeting[] = [
     dateTime: '2026-08-09 10:30',
     timeRange: '10:30 - 11:30 EST',
     department: 'Product Strategy',
-    participants: ['Alex Mercer', 'Marcus Vance', 'David Chen', 'Amanda Brooks'],
+    participants: ['Thim Yee Song', 'Kam Xin Le', 'Duncan', 'Yap En Yu'],
     status: 'Completed',
     duration: '60 mins',
-    summary: 'Demonstrated the automatic cross-meeting contradiction detection algorithm. Marcus reviewed UI integration for real-time notification alerts, and Amanda confirmed regulatory compliance standards.',
+    summary: 'Demonstrated the automatic cross-meeting contradiction detection algorithm. Kam Xin Le reviewed UI integration for real-time notification alerts, and Yap En Yu confirmed regulatory compliance standards.',
     decisions: [
       {
         id: 'dec-3',
@@ -264,8 +240,8 @@ const initialMeetings: Meeting[] = [
     actionItems: [initialActionItems[2]],
     contradictions: [initialContradictions[1], initialContradictions[2]],
     transcript: [
-      { id: 't6', speaker: 'Marcus Vance', time: '01:00', text: 'The Contradiction Engine scans meeting transcripts in real-time and flags policy conflicts across departments.', sentiment: 'positive' },
-      { id: 't7', speaker: 'Amanda Brooks', time: '03:20', text: 'This is crucial for legal audits. If an engineering team changes retention rules without legal review, we get an instant alert.', sentiment: 'action' }
+      { id: 't6', speaker: 'Kam Xin Le', time: '01:00', text: 'The Contradiction Engine scans meeting transcripts in real-time and flags policy conflicts across departments.', sentiment: 'positive' },
+      { id: 't7', speaker: 'Yap En Yu', time: '03:20', text: 'This is crucial for legal audits. If an engineering team changes retention rules without legal review, we get an instant alert.', sentiment: 'action' }
     ]
   },
   {
@@ -275,7 +251,7 @@ const initialMeetings: Meeting[] = [
     dateTime: '2026-08-06 11:00',
     timeRange: '11:00 - 12:00 EST',
     department: 'Security & Compliance',
-    participants: ['Sarah Jenkins', 'Amanda Brooks', 'David Chen'],
+    participants: ['Duncan', 'Yap En Yu', 'Kam Xin Le'],
     status: 'Completed',
     duration: '50 mins',
     summary: 'Reviewed Okta SAML 2.0 single sign-on integration for enterprise client tier and automated SOC2 immutable log retention policies.',
@@ -292,7 +268,7 @@ const initialMeetings: Meeting[] = [
     actionItems: [initialActionItems[1]],
     contradictions: [],
     transcript: [
-      { id: 't8', speaker: 'Sarah Jenkins', time: '01:15', text: 'We are enabling WebAuthn passkeys for all admin infrastructure accounts starting next release.', sentiment: 'positive' }
+      { id: 't8', speaker: 'Duncan', time: '01:15', text: 'We are enabling WebAuthn passkeys for all admin infrastructure accounts starting next release.', sentiment: 'positive' }
     ]
   },
   {
@@ -302,10 +278,10 @@ const initialMeetings: Meeting[] = [
     dateTime: '2026-08-05 15:00',
     timeRange: '15:00 - 16:00 EST',
     department: 'Finance & Operations',
-    participants: ['Elena Rostova', 'Marcus Vance'],
+    participants: ['Yap En Yu', 'Kam Xin Le'],
     status: 'Completed',
     duration: '40 mins',
-    summary: 'Elena reviewed Q4 department cost allocations and revenue targets for enterprise licenses.',
+    summary: 'Yap En Yu reviewed Q4 department cost allocations and revenue targets for enterprise licenses.',
     decisions: [
       {
         id: 'dec-102',
@@ -319,7 +295,7 @@ const initialMeetings: Meeting[] = [
     actionItems: [initialActionItems[3]],
     contradictions: [],
     transcript: [
-      { id: 't9', speaker: 'Elena Rostova', time: '02:00', text: 'We will allocate $50,000 for model quantization and cost reduction initiatives.', sentiment: 'positive' }
+      { id: 't9', speaker: 'Yap En Yu', time: '02:00', text: 'We will allocate $50,000 for model quantization and cost reduction initiatives.', sentiment: 'positive' }
     ]
   },
   {
@@ -329,7 +305,7 @@ const initialMeetings: Meeting[] = [
     dateTime: '2026-08-14 14:00',
     timeRange: '14:00 - 15:00 EST',
     department: 'Engineering & AI',
-    participants: ['Alex Mercer', 'Sarah Jenkins', 'David Chen'],
+    participants: ['Thim Yee Song', 'Duncan', 'Kam Xin Le'],
     status: 'Scheduled',
     duration: '60 mins',
     summary: 'Technical alignment on vector database indexing speed and Neo4j memory optimizations for RAG 2.0.',
@@ -345,7 +321,7 @@ const initialMeetings: Meeting[] = [
     dateTime: '2026-08-15 11:00',
     timeRange: '11:00 - 12:00 EST',
     department: 'Product Strategy',
-    participants: ['Marcus Vance', 'Elena Rostova'],
+    participants: ['Kam Xin Le', 'Yap En Yu'],
     status: 'Scheduled',
     duration: '45 mins',
     summary: 'Pre-sales technical review for Okta SAML 2.0 endpoints required by enterprise accounts.',
@@ -361,7 +337,7 @@ const initialMeetings: Meeting[] = [
     dateTime: '2026-08-16 10:00',
     timeRange: '10:00 - 11:00 EST',
     department: 'Security & Compliance',
-    participants: ['Amanda Brooks', 'Sarah Jenkins'],
+    participants: ['Yap En Yu', 'Duncan'],
     status: 'Scheduled',
     duration: '30 mins',
     summary: 'Reviewing GDPR 90-day session log deletion policies vs AI model training retention rules.',
@@ -484,12 +460,21 @@ const initialDirectMessages: DirectMessage[] = [
   }
 ];
 
+// ── Coco Chat Message type (shared between context and CocoChatView) ──────
+export interface CocoChatMessage {
+  id: string;
+  role: 'user' | 'ai';
+  text: string;
+  citations: Array<{ filename: string; timestamp: string; speaker: string; excerpt?: string }>;
+  ts: string;
+}
+
 interface AppContextType {
   currentUser: UserProfile;
   updateCurrentUser: (updated: Partial<UserProfile>) => void;
   switchDemoUser: (employeeId: string) => void;
   isLoggedIn: boolean;
-  login: (email: string, pass: string, dept: string) => boolean;
+  login: (username: string, pass: string) => boolean;
   logout: () => void;
 
   activeTab: TabType;
@@ -532,25 +517,150 @@ interface AppContextType {
 
   isCreateMeetingOpen: boolean;
   setIsCreateMeetingOpen: (open: boolean) => void;
+
+  // Persistent Coco chat history (survives tab navigation, keyed per user)
+  cocoChatHistory: CocoChatMessage[];
+  setCocoChatHistory: React.Dispatch<React.SetStateAction<CocoChatMessage[]>>;
+  clearCocoChatHistory: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<UserProfile>(INITIAL_USER_PROFILE);
-  
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
+    try {
+      const saved = localStorage.getItem('corporate_brain_current_user');
+      return saved ? (JSON.parse(saved) as UserProfile) : INITIAL_USER_PROFILE;
+    } catch {
+      return INITIAL_USER_PROFILE;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('corporate_brain_current_user', JSON.stringify(currentUser));
+    } catch {
+      /* ignore */
+    }
+  }, [currentUser]);
+
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('corporate_brain_is_logged_in');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('corporate_brain_is_logged_in', JSON.stringify(isLoggedIn));
+    } catch {
+      /* ignore */
+    }
+  }, [isLoggedIn]);
+
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   
   const [employees] = useState<Employee[]>(initialEmployees);
-  const [meetings, setMeetings] = useState<Meeting[]>(initialMeetings);
+  const [meetings, setMeetings] = useState<Meeting[]>(() => {
+    try {
+      const saved = localStorage.getItem('corporate_brain_meetings');
+      return saved ? JSON.parse(saved) : initialMeetings;
+    } catch {
+      return initialMeetings;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('corporate_brain_meetings', JSON.stringify(meetings));
+    } catch {
+      /* ignore */
+    }
+  }, [meetings]);
+
   const [contradictions] = useState<Contradiction[]>(initialContradictions);
   const [actionItems, setActionItems] = useState<ActionItem[]>(initialActionItems);
   const [personalDashboard, setPersonalDashboard] = useState<api.BackendDashboard | null>(null);
-  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
+
+  const [notifications, setNotifications] = useState<Notification[]>(() => {
+    try {
+      const saved = localStorage.getItem('corporate_brain_notifications');
+      return saved ? JSON.parse(saved) : initialNotifications;
+    } catch {
+      return initialNotifications;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('corporate_brain_notifications', JSON.stringify(notifications));
+    } catch {
+      /* ignore */
+    }
+  }, [notifications]);
+
+  // Real-time cross-tab & session sync for meetings and notifications
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'corporate_brain_meetings' && e.newValue) {
+        try { setMeetings(JSON.parse(e.newValue)); } catch {}
+      }
+      if (e.key === 'corporate_brain_notifications' && e.newValue) {
+        try { setNotifications(JSON.parse(e.newValue)); } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   const [directMessages, setDirectMessages] = useState<DirectMessage[]>(initialDirectMessages);
   const [selectedChatUserId, setSelectedChatUserId] = useState<string>('emp-1');
   const [isCreateMeetingOpen, setIsCreateMeetingOpen] = useState<boolean>(false);
+
+  // ── Coco chat history: persisted per user in localStorage ──────────────
+  const [cocoChatHistory, setRawCocoChatHistory] = useState<CocoChatMessage[]>(() => {
+    try {
+      const saved = localStorage.getItem(`coco_chat_${currentUser.email || 'guest'}`);
+      return saved ? (JSON.parse(saved) as CocoChatMessage[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Load history whenever user logs in, switches profile, or isLoggedIn changes
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const email = currentUser.email || 'guest';
+    try {
+      const saved = localStorage.getItem(`coco_chat_${email}`);
+      setRawCocoChatHistory(saved ? (JSON.parse(saved) as CocoChatMessage[]) : []);
+    } catch {
+      setRawCocoChatHistory([]);
+    }
+  }, [currentUser.email, isLoggedIn]);
+
+  // Handler passed to components — updates state AND persists to localStorage
+  const setCocoChatHistory: React.Dispatch<React.SetStateAction<CocoChatMessage[]>> = (action) => {
+    setRawCocoChatHistory(prev => {
+      const next = typeof action === 'function' ? action(prev) : action;
+      const email = currentUser.email || 'guest';
+      try {
+        localStorage.setItem(`coco_chat_${email}`, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  const clearCocoChatHistory = () => {
+    setRawCocoChatHistory([]);
+    const email = currentUser.email || 'guest';
+    try { localStorage.removeItem(`coco_chat_${email}`); } catch { /* ignore */ }
+  };
 
   // Load real meetings from the backend (docs/IMPLEMENTATION_PLAN.md Phase 5)
   // and merge them ahead of the bundled mock data. If the backend isn't
@@ -636,19 +746,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return notifications.filter(n => !n.read).length;
   }, [notifications]);
 
-  const login = (email: string, pass: string, dept: string) => {
-    if (!email) return false;
-    setCurrentUser(prev => ({
-      ...prev,
-      email,
-      department: dept || prev.department,
-      name: email.split('@')[0].replace('.', ' ').toUpperCase() || 'Alex Mercer'
-    }));
+  const login = (username: string, pass: string) => {
+    if (!username.trim()) return false;
+    const cleanName = username.trim();
+    const matchedEmp = initialEmployees.find(
+      (e) => e.name.toLowerCase() === cleanName.toLowerCase() || e.name.toLowerCase().includes(cleanName.toLowerCase())
+    );
+
+    if (matchedEmp) {
+      setCurrentUser(prev => ({
+        ...prev,
+        id: matchedEmp.id,
+        name: matchedEmp.name,
+        email: matchedEmp.email,
+        role: matchedEmp.role,
+        title: matchedEmp.role,
+        department: matchedEmp.department,
+        avatarUrl: matchedEmp.avatarUrl || prev.avatarUrl
+      }));
+    } else {
+      setCurrentUser(prev => ({
+        ...prev,
+        name: cleanName,
+        email: `${cleanName.toLowerCase().replace(/\s+/g, '.')}@corpbrain.ai`
+      }));
+    }
+
     setIsLoggedIn(true);
     return true;
   };
 
   const logout = () => {
+    // Clear display state for signed-out view while preserving localStorage history intact
+    setRawCocoChatHistory([]);
     setIsLoggedIn(false);
   };
 
@@ -1133,7 +1263,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         openDmWithUser,
         closeDmDrawer,
         isCreateMeetingOpen,
-        setIsCreateMeetingOpen
+        setIsCreateMeetingOpen,
+        cocoChatHistory,
+        setCocoChatHistory,
+        clearCocoChatHistory,
       }}
     >
       {children}

@@ -3,18 +3,18 @@ import { Meeting, Employee, Notification, UserProfile } from '../types';
 export const INITIAL_EMPLOYEES_DATA: Employee[] = [
   {
     id: 'emp-0',
-    name: 'Alex Mercer',
-    email: 'alex.mercer@corpbrain.ai',
+    name: 'Thim Yee Song',
+    email: 'thim.yeesong@corpbrain.ai',
     phone: '+1 (555) 123-4567',
-    department: 'Engineering & AI',
-    role: 'Lead Cloud Architect',
+    department: 'Product & Executive',
+    role: 'VP of Product',
     avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
     isOnline: true
   },
   {
     id: 'emp-1',
-    name: 'Sarah Jenkins',
-    email: 'sarah.jenkins@corpbrain.ai',
+    name: 'Duncan',
+    email: 'duncan@corpbrain.ai',
     phone: '+1 (555) 234-5678',
     department: 'Core Systems',
     role: 'VP of Engineering',
@@ -23,8 +23,8 @@ export const INITIAL_EMPLOYEES_DATA: Employee[] = [
   },
   {
     id: 'emp-2',
-    name: 'Marcus Vance',
-    email: 'marcus.vance@corpbrain.ai',
+    name: 'Kam Xin Le',
+    email: 'kam.xinle@corpbrain.ai',
     phone: '+1 (555) 345-6789',
     department: 'Product Strategy',
     role: 'Head of Product',
@@ -33,33 +33,13 @@ export const INITIAL_EMPLOYEES_DATA: Employee[] = [
   },
   {
     id: 'emp-3',
-    name: 'Elena Rostova',
-    email: 'elena.rostova@corpbrain.ai',
+    name: 'Yap En Yu',
+    email: 'yap.enyu@corpbrain.ai',
     phone: '+1 (555) 456-7890',
     department: 'Executive Ops',
     role: 'Chief Financial Officer',
     avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
     isOnline: false
-  },
-  {
-    id: 'emp-4',
-    name: 'David Chen',
-    email: 'david.chen@corpbrain.ai',
-    phone: '+1 (555) 567-8901',
-    department: 'ML & Graph Pipeline',
-    role: 'Principal AI Engineer',
-    avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-    isOnline: true
-  },
-  {
-    id: 'emp-5',
-    name: 'Amanda Brooks',
-    email: 'amanda.brooks@corpbrain.ai',
-    phone: '+1 (555) 678-9012',
-    department: 'Legal & Compliance',
-    role: 'General Counsel',
-    avatarUrl: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80',
-    isOnline: true
   }
 ];
 
@@ -457,11 +437,11 @@ export const INITIAL_MEETINGS_DATA: Meeting[] = [
 
 export const INITIAL_USER_PROFILE: UserProfile = {
   id: 'emp-0',
-  name: 'Alex Mercer',
+  name: 'Thim Yee Song',
   title: 'VP of Product',
   role: 'VP of Product',
   department: 'Product Strategy',
-  email: 'alex.mercer@corpbrain.ai',
+  email: 'thim.yeesong@corpbrain.ai',
   phone: '+1 (555) 123-4567',
   avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
   preferences: {

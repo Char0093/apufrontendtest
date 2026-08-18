@@ -31,3 +31,9 @@ class QueryResponse(BaseModel):
 def ask_coco_query(payload: QueryRequest) -> QueryResponse:
     result = askcoco_service.ask(payload.query)
     return QueryResponse(**result)
+
+
+@router.post("/api/chat", response_model=QueryResponse)
+def ask_coco_chat(payload: QueryRequest) -> QueryResponse:
+    result = askcoco_service.ask(payload.query)
+    return QueryResponse(**result)
