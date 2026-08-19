@@ -1,7 +1,6 @@
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 from typing import List, Dict, Optional
 import numpy as np
@@ -15,20 +14,18 @@ settings = get_settings()
 _EMBED_DIR = Path(settings.storage_path) / "embeddings"
 _EMBED_DIR.mkdir(parents=True, exist_ok=True)
 
+_genai_client = None
 
-def _get_embed_fn():
-    """Returns Google GenAI Cloud Embedding function (0MB RAM)."""
-    if settings.gemini_api_key:
+
+def _get_client():
+    global _genai_client
+    if _genai_client is None and settings.gemini_api_key:
         try:
-            os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
-            from chromadb.utils.embedding_functions import GoogleGenaiEmbeddingFunction
-            return GoogleGenaiEmbeddingFunction(
-                model_name="gemini-embedding-001",
-                api_key_env_var="GEMINI_API_KEY",
-            )
+            from google import genai
+            _genai_client = genai.Client(api_key=settings.gemini_api_key)
         except Exception as e:
-            logger.warning(f"Google GenAI Embedding init notice: {e}")
-    return None
+            logger.warning(f"Google GenAI Client init notice: {e}")
+    return _genai_client
 
 
 def _stable_hash(text: str) -> str:
@@ -36,26 +33,29 @@ def _stable_hash(text: str) -> str:
 
 
 def index_meeting(meeting_id: str, filename: str, intelligence: MeetingIntelligence) -> None:
-    """Index meeting decisions and summary into pure-Python vector store (100% cloud stable)."""
+    """Fast batch indexing of meeting decisions using official Google GenAI SDK."""
     try:
-        embed_fn = _get_embed_fn()
-        records = []
+        client = _get_client()
+        decisions_texts = [(d.text or d.title or "").strip() for d in intelligence.decisions if (d.text or d.title or "").strip()]
+        
+        vectors_map = {}
+        if client and decisions_texts:
+            try:
+                resp = client.models.embed_content(
+                    model="gemini-embedding-001",
+                    contents=decisions_texts,
+                )
+                if hasattr(resp, "embeddings") and resp.embeddings:
+                    for txt, emb in zip(decisions_texts, resp.embeddings):
+                        vectors_map[txt] = list(emb.values)
+            except Exception as e:
+                logger.warning(f"Batch embedding notice: {e}")
 
-        # 1. Embed decisions
+        records = []
         for i, d in enumerate(intelligence.decisions):
             txt = (d.text or d.title or "").strip()
             if not txt:
                 continue
-            
-            vec = []
-            if embed_fn:
-                try:
-                    res = embed_fn([txt])
-                    if res and len(res) > 0:
-                        vec = res[0].tolist() if hasattr(res[0], "tolist") else list(res[0])
-                except Exception as ex:
-                    logger.warning(f"Embedding generate notice for decision '{txt}': {ex}")
-
             records.append({
                 "id": f"{meeting_id}_dec_{i}_{_stable_hash(txt)}",
                 "meeting_id": meeting_id,
@@ -64,31 +64,33 @@ def index_meeting(meeting_id: str, filename: str, intelligence: MeetingIntellige
                 "speaker": d.speaker,
                 "timestamp": d.timestamp,
                 "filename": filename,
-                "vector": vec,
+                "vector": vectors_map.get(txt, []),
             })
 
-        # 2. Save records to persistent disk file
         file_path = _EMBED_DIR / f"{meeting_id}.json"
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(records, f)
 
         logger.info(f"Indexed {len(records)} decision embeddings for meeting {meeting_id}")
     except Exception as e:
-        logger.warning(f"Vector indexing skipped for meeting {meeting_id}: {e}")
+        logger.warning(f"Vector indexing notice for meeting {meeting_id}: {e}")
 
 
 def query_similar_decisions(decision_text: str, exclude_meeting_id: str, n_results: int = 3) -> List[Dict]:
     """Nearest-neighbor search across stored decision vectors using cosine similarity."""
     try:
-        embed_fn = _get_embed_fn()
-        if not embed_fn:
+        client = _get_client()
+        if not client or not decision_text.strip():
             return []
 
         query_vec = None
         try:
-            res = embed_fn([decision_text])
-            if res and len(res) > 0:
-                query_vec = np.array(res[0], dtype=np.float32)
+            resp = client.models.embed_content(
+                model="gemini-embedding-001",
+                contents=[decision_text.strip()],
+            )
+            if hasattr(resp, "embeddings") and resp.embeddings:
+                query_vec = np.array(resp.embeddings[0].values, dtype=np.float32)
         except Exception as ex:
             logger.warning(f"Query embedding notice: {ex}")
             return []
@@ -96,7 +98,6 @@ def query_similar_decisions(decision_text: str, exclude_meeting_id: str, n_resul
         if query_vec is None or len(query_vec) == 0:
             return []
 
-        # Scan all stored meeting embedding files
         candidates = []
         norm_q = np.linalg.norm(query_vec)
         if norm_q == 0:
@@ -114,7 +115,6 @@ def query_similar_decisions(decision_text: str, exclude_meeting_id: str, n_resul
                         cand_v = np.array(v, dtype=np.float32)
                         norm_c = np.linalg.norm(cand_v)
                         if norm_c > 0:
-                            # Cosine distance = 1 - cosine similarity
                             sim = float(np.dot(query_vec, cand_v) / (norm_q * norm_c))
                             dist = max(0.0, 1.0 - sim)
                             candidates.append({
