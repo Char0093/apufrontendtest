@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   LayoutDashboard,
+  BrainCircuit,
   Video,
   Share2,
   Sparkles,
@@ -50,7 +51,7 @@ export const Sidebar: React.FC = () => {
     {
       id: 'meetings',
       label: 'Meeting Intelligence',
-      icon: <Video className="w-5 h-5" />
+      icon: <BrainCircuit className="w-5 h-5" />
     },
     {
       id: 'memoryGraph',

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { ChatBubbleFAB } from '../DirectMessage/ChatBubbleFAB';
 import { 
   Users, 
   Search, 
@@ -13,10 +14,11 @@ import {
 } from 'lucide-react';
 
 export const EmployeeDirectoryView: React.FC = () => {
-  const { employees, openChatWithUser } = useApp();
+  const { employees, openChatWithUser, currentUser } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDept, setSelectedDept] = useState('All');
+  const [fbTarget, setFbTarget] = useState<{ email: string; name: string; avatarUrl: string } | null>(null);
 
   const departments = ['All', 'Engineering', 'Product Strategy', 'Finance & Operations', 'Legal & Compliance'];
 
@@ -180,7 +182,7 @@ export const EmployeeDirectoryView: React.FC = () => {
                 </div>
 
                 <button
-                  onClick={() => openChatWithUser(emp.id)}
+                  onClick={() => setFbTarget({ email: emp.email, name: emp.name, avatarUrl: emp.avatarUrl ?? '' })}
                   className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-950/80 hover:bg-blue-600 text-blue-600 dark:text-blue-400 hover:text-white text-xs font-semibold rounded-xl border border-blue-200 dark:border-blue-800/60 flex items-center space-x-1.5 transition-all shadow-xs"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
@@ -192,6 +194,18 @@ export const EmployeeDirectoryView: React.FC = () => {
           ))
         )}
       </div>
+
+
+      {/* Floating Chat Bubble FAB - Firebase Real-Time Messenger */}
+      <ChatBubbleFAB
+        myUser={{
+          email: currentUser.email,
+          name: currentUser.name,
+          avatarUrl: currentUser.avatarUrl ?? '',
+        }}
+        initialTarget={fbTarget}
+        onTargetConsumed={() => setFbTarget(null)}
+      />
 
     </div>
   );

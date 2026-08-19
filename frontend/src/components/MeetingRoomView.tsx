@@ -23,10 +23,10 @@ import {
   Maximize2,
   Minimize2,
 } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { useLiveMeetingSession } from '../hooks/useLiveMeetingSession';
-import { askCoco, BackendCitation } from '../services/api';
+import { askCoco, BackendCitation, analyzeTranscript } from '../services/api';
 import { CollaborativeWhiteboard } from './CollaborativeWhiteboard';
 import { LiveSuggestionBanner } from './LiveSuggestionBanner';
 import { LiveTranscriptPanel } from './LiveTranscriptPanel';
@@ -170,6 +170,7 @@ const CocoPanel: React.FC = () => {
 };
 
 const RoomContent: React.FC<{ roomName: string; displayName: string; token: string; onLeave: () => void }> = ({ roomName, displayName, token, onLeave }) => {
+  const { currentUser, meetings, addLiveMeetingIntelligence } = useApp();
   const participants = useParticipants();
   const cameraTracks = useTracks([Track.Source.Camera]);
   const screenTracks = useTracks([Track.Source.ScreenShare]);
@@ -178,8 +179,6 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
   const [showCoco, setShowCoco] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
   const [isScreenEnlarged, setIsScreenEnlarged] = useState(false);
-  const [isProcessingPipeline, setIsProcessingPipeline] = useState(false);
-  const [pipelineStep, setPipelineStep] = useState(0);
   const liveSession = useLiveMeetingSession(roomName, token);
 
   const toggle = async (kind: 'microphone' | 'camera' | 'screen') => {
@@ -194,41 +193,216 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
   };
 
   const handleLeaveMeeting = () => {
-    setIsProcessingPipeline(true);
-    setPipelineStep(1);
+    // 1. Auto export whiteboard PDF only if whiteboard was drawn on
+    let exportedPdfName: string | undefined = undefined;
+    try {
+      const exportBtn = document.querySelector('[title="Export Whiteboard PDF Pages"]') as HTMLButtonElement;
+      if (exportBtn) {
+        exportBtn.click();
+        exportedPdfName = `Whiteboard_${roomName.replace(/[^a-zA-Z0-9_-]/g, '-')}.pdf`;
+      }
+    } catch {
+      // whiteboard empty or unavailable
+    }
 
-    const steps = [
-      'Extracting audio (16kHz mono WAV)...',
-      'Running PyAnnote 3.1 speaker diarization timeline...',
-      'Deepgram & Whisper timestamped transcription...',
-      'Gemini Vision reading speaker nameplates...',
-      'Gemini 2.5 Flash extracting decisions, actions & flags...',
-      'Indexing results into Corporate Brain & saving whiteboard PDF...'
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // 2. Find matching scheduled meeting by roomCode (e.g. T9AHS -> "Testing 1")
+    const scheduledMeeting = meetings.find(
+      (m) =>
+        (m.roomCode && m.roomCode.toLowerCase() === roomName.toLowerCase()) ||
+        (m.id && m.id.toLowerCase() === roomName.toLowerCase())
+    );
+
+    const meetingId = scheduledMeeting ? scheduledMeeting.id : `mtg-live-${Date.now()}`;
+    const meetingTitle = scheduledMeeting ? scheduledMeeting.title : `Live Room: ${roomName} — ${dateStr}`;
+    const meetingProject = scheduledMeeting ? scheduledMeeting.project : 'Live Intelligence';
+    const meetingDepartment = scheduledMeeting ? scheduledMeeting.department : 'Engineering & AI';
+
+    // 3. Accurate participant list (ONLY real attendees, no unrelated dummy names)
+    const joinedNames = participants.map((p) => p.name || p.identity).filter(Boolean);
+    const transcriptSpeakers = liveSession.transcript.map((t) => t.speaker).filter(Boolean);
+    const scheduledAttendees = scheduledMeeting ? scheduledMeeting.participants : [];
+    const attendeeNames = Array.from(
+      new Set([
+        currentUser.name,
+        ...joinedNames,
+        ...transcriptSpeakers,
+        ...scheduledAttendees
+      ])
+    ).filter(Boolean);
+
+    // 4. Build transcript segments from actual live recorded dialogue, replacing partial fragments
+    const cleanLines: typeof liveSession.transcript = [];
+    liveSession.transcript.forEach((line) => {
+      const lineText = line.text.trim().toLowerCase();
+      // Drop any partial chunk if a longer complete processed sentence contains it
+      const hasSuperiorLine = liveSession.transcript.some(
+        (other) =>
+          other !== line &&
+          other.speaker === line.speaker &&
+          other.text.toLowerCase().includes(lineText) &&
+          other.text.length > line.text.length
+      );
+      if (!hasSuperiorLine) {
+        cleanLines.push(line);
+      }
+    });
+
+    const finalTranscript = cleanLines.map((line, idx) => ({
+      id: `trans-${Date.now()}-${idx}`,
+      speaker: line.speaker,
+      time: line.timestamp,
+      text: line.text,
+      sentiment: 'neutral' as const
+    }));
+
+    const initialSummary = `Live meeting session between ${attendeeNames.join(' and ')}.`;
+
+    // 5. Initial knowledge graph containing Person, Meeting & Project nodes
+    const initialGraphNodes: any[] = [
+      ...attendeeNames.map((name) => ({
+        id: `person:${name}`,
+        name,
+        type: 'Person',
+        role: name === currentUser.name ? 'Organizer' : 'Participant',
+        meetingId
+      })),
+      { id: `meeting:${meetingId}`, name: meetingTitle, type: 'Meeting', meetingId },
+      { id: `project:${meetingProject}`, name: meetingProject, type: 'Project', meetingId }
     ];
 
-    let current = 1;
-    const interval = setInterval(() => {
-      current += 1;
-      if (current <= steps.length) {
-        setPipelineStep(current);
-      } else {
-        clearInterval(interval);
-        setTimeout(() => {
-          setIsProcessingPipeline(false);
-          onLeave();
-        }, 600);
+    const initialGraphLinks: any[] = [
+      ...attendeeNames.map((name) => ({
+        source: `person:${name}`,
+        target: `meeting:${meetingId}`,
+        label: 'PARTICIPATED_IN',
+        meetingId
+      })),
+      {
+        source: `meeting:${meetingId}`,
+        target: `project:${meetingProject}`,
+        label: 'RELATES_TO',
+        meetingId
       }
-    }, 600);
-  };
+    ];
 
-  const pipelineStages = [
-    { title: 'Audio Extraction', desc: 'ffmpeg: video -> 16kHz mono WAV' },
-    { title: 'Speaker Diarization', desc: 'PyAnnote 3.1 speaker timeline alignment' },
-    { title: 'Deepgram & Whisper ASR', desc: 'Timestamped transcript generation' },
-    { title: 'Gemini Vision Nameplates', desc: 'Extracting video frame nameplates' },
-    { title: 'Gemini Flash AI Analysis', desc: 'Extracting decisions, rationale & action items' },
-    { title: 'Knowledge Graph Ingestion', desc: 'Saving meeting intelligence & whiteboard PDF' }
-  ];
+    const initialMeetingRecord: any = {
+      id: meetingId,
+      title: meetingTitle,
+      project: meetingProject,
+      dateTime: scheduledMeeting ? scheduledMeeting.dateTime : `${dateStr} ${timeStr}`,
+      timeRange: scheduledMeeting?.timeRange || `${timeStr} (Live)`,
+      department: meetingDepartment,
+      participants: attendeeNames,
+      status: 'Completed',
+      duration: scheduledMeeting?.duration || '15 mins',
+      summary: initialSummary,
+      decisions: [],
+      actionItems: [],
+      roomCode: roomName,
+      whiteboardPdfName: exportedPdfName,
+      transcript: finalTranscript,
+      graphData: {
+        nodes: initialGraphNodes,
+        links: initialGraphLinks
+      }
+    };
+
+    // 6. Instantly save meeting record and exit room immediately (Zero lag!)
+    addLiveMeetingIntelligence(initialMeetingRecord);
+    onLeave();
+
+    // 7. Background AI Intelligence Synthesis via Gemini / Agnes AI (Seamlessly enriches meeting intelligence)
+    if (finalTranscript.length > 0) {
+      analyzeTranscript(
+        finalTranscript.map((t) => ({ speaker: t.speaker, text: t.text, timestamp: t.time })),
+        attendeeNames
+      ).then((analysis) => {
+        if (!analysis) return;
+
+        let synthesizedDecisions: any[] = [];
+        let synthesizedActions: any[] = [];
+
+        if (analysis.decisions && analysis.decisions.length > 0) {
+          synthesizedDecisions = analysis.decisions.map((d: any, i: number) => ({
+            id: `dec-${Date.now()}-${i}`,
+            title: d.title || d.text || 'Decision reached in discussion',
+            rationale: d.reason || `Agreed during discussion by ${d.speaker || 'team'}.`,
+            evidence: d.evidence || `${d.speaker || 'Speaker'}: "${d.title || d.text || ''}"`,
+            confidenceScore: d.confidence === 'firm_commitment' ? 98 : 94,
+            category: meetingProject,
+            impactLevel: 'Medium'
+          }));
+        }
+
+        if (analysis.action_items && analysis.action_items.length > 0) {
+          synthesizedActions = analysis.action_items.map((a: any, i: number) => ({
+            id: `act-${Date.now()}-${i}`,
+            task: a.task,
+            assignee: a.assignee || currentUser.name,
+            dueDate: a.deadline || 'Upcoming',
+            status: 'To Do',
+            priority: (a.priority === 'high' ? 'High' : 'Medium') as any,
+            meetingTitle
+          }));
+        }
+
+        const enrichedGraphNodes = [
+          ...initialGraphNodes,
+          ...synthesizedDecisions.map((d: any) => ({
+            id: `decision:${d.id}`,
+            name: d.title,
+            type: 'Decision',
+            meetingId
+          })),
+          ...synthesizedActions.map((a: any) => ({
+            id: `action:${a.id}`,
+            name: a.task,
+            type: 'ActionItem',
+            meetingId
+          }))
+        ];
+
+        const enrichedGraphLinks = [
+          ...initialGraphLinks,
+          ...synthesizedDecisions.map((d: any) => ({
+            source: `decision:${d.id}`,
+            target: `meeting:${meetingId}`,
+            label: 'MADE_IN',
+            meetingId
+          })),
+          ...synthesizedActions.map((a: any) => ({
+            source: `action:${a.id}`,
+            target: `meeting:${meetingId}`,
+            label: 'MADE_IN',
+            meetingId
+          })),
+          ...synthesizedActions.map((a: any) => ({
+            source: `action:${a.id}`,
+            target: `person:${a.assignee}`,
+            label: 'ASSIGNED_TO',
+            meetingId
+          }))
+        ];
+
+        addLiveMeetingIntelligence({
+          ...initialMeetingRecord,
+          summary: analysis.summary || initialMeetingRecord.summary,
+          decisions: synthesizedDecisions,
+          actionItems: synthesizedActions,
+          graphData: {
+            nodes: enrichedGraphNodes,
+            links: enrichedGraphLinks
+          }
+        });
+      }).catch((err) => {
+        console.warn('Background AI transcript analysis:', err);
+      });
+    }
+  };
 
   return (
     <div data-meeting-recording-area className="space-y-5 p-4 sm:p-6">
@@ -330,7 +504,7 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
           </section>
           <CollaborativeWhiteboard roomName={roomName} />
           {showCoco && <CocoPanel />}
-          {showTranscript && <LiveTranscriptPanel transcript={liveSession.transcript} error={liveSession.captionsError || liveSession.connectionError} />}
+          {showTranscript && <LiveTranscriptPanel transcript={liveSession.transcript} interimLine={liveSession.interimLine} error={liveSession.captionsError || liveSession.connectionError} />}
         </div>
 
         <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-4">
@@ -358,9 +532,9 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
           <Sparkles className="h-5 w-5" /><span>Coco</span>
         </button>
         <button
-          onClick={() => { setShowTranscript((v) => !v); liveSession.toggleCaptions(); }}
+          onClick={() => setShowTranscript((prev) => !prev)}
           className={`flex min-w-20 flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
-            liveSession.captionsEnabled ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            showTranscript ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
           }`}
         >
           <Captions className="h-5 w-5" /><span>Transcript</span>
@@ -370,87 +544,47 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
         <button onClick={handleLeaveMeeting} className="flex min-w-20 flex-col items-center gap-1 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 cursor-pointer"><LogOut className="h-5 w-5" /><span>Leave</span></button>
       </div>
 
-      {/* MEETINGS/pipeline.py Auto Intelligence Extraction Modal */}
-      {isProcessingPipeline && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md animate-fade-in font-sans">
-          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-6">
-            <div className="flex items-center space-x-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="p-2.5 bg-blue-50 dark:bg-blue-950/80 rounded-2xl text-blue-600 dark:text-blue-400">
-                <Sparkles className="w-6 h-6 animate-pulse" />
-              </div>
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900 dark:text-white font-sans">
-                  Meeting Intelligence Pipeline Extraction
-                </h3>
-                <p className="text-xs text-slate-400 font-mono">
-                  Simulating MEETINGS/pipeline.py workflow
-                </p>
-              </div>
-            </div>
 
-            <div className="space-y-3">
-              {pipelineStages.map((stage, idx) => {
-                const stageNum = idx + 1;
-                const isDone = pipelineStep > stageNum;
-                const isCurrent = pipelineStep === stageNum;
-                return (
-                  <div
-                    key={idx}
-                    className={`p-3 rounded-2xl border transition-all flex items-center justify-between ${
-                      isDone
-                        ? 'bg-emerald-50/60 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-200'
-                        : isCurrent
-                        ? 'bg-blue-50/80 dark:bg-blue-950/60 border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-200 shadow-sm'
-                        : 'bg-slate-50 dark:bg-slate-800/40 border-slate-100 dark:border-slate-800 text-slate-400 opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold font-mono ${
-                        isDone
-                          ? 'bg-emerald-600 text-white'
-                          : isCurrent
-                          ? 'bg-blue-600 text-white animate-bounce'
-                          : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
-                      }`}>
-                        {stageNum}
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold font-sans">{stage.title}</div>
-                        <div className="text-[10px] opacity-80 font-mono">{stage.desc}</div>
-                      </div>
-                    </div>
-
-                    {isDone && <span className="text-xs font-bold font-mono text-emerald-600">DONE</span>}
-                    {isCurrent && <span className="text-xs font-bold font-mono text-blue-600 animate-pulse">RUNNING...</span>}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
 
 export const MeetingRoomView: React.FC = () => {
-  const { currentUser } = useApp();
-  const [roomName, setRoomName] = useState('');
+  const { currentUser, pendingJoinRoomCode, setPendingJoinRoomCode } = useApp();
+  const [roomName, setRoomName] = useState(pendingJoinRoomCode || '');
   const [displayName, setDisplayName] = useState(currentUser.name);
   const [joinDetails, setJoinDetails] = useState<JoinDetails | null>(null);
   const [error, setError] = useState('');
   const [isJoining, setIsJoining] = useState(false);
 
-  const joinRoom = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setIsJoining(true); setError('');
-    try { setJoinDetails(await getJoinDetails(roomName.trim(), displayName.trim())); }
-    catch (joinError) { setError(joinError instanceof Error ? joinError.message : 'Unable to join meeting.'); }
-    finally { setIsJoining(false); }
+  const joinRoom = async (event?: React.FormEvent, customRoom?: string) => {
+    if (event) event.preventDefault();
+    const targetRoom = (customRoom || roomName).trim();
+    if (!targetRoom) return;
+
+    setIsJoining(true);
+    setError('');
+    try {
+      setJoinDetails(await getJoinDetails(targetRoom, displayName.trim()));
+    } catch (joinError) {
+      setError(joinError instanceof Error ? joinError.message : 'Unable to join meeting.');
+    } finally {
+      setIsJoining(false);
+    }
   };
 
+  // Auto-join when directed from Dashboard "Enter Room" button
+  useEffect(() => {
+    if (pendingJoinRoomCode) {
+      const code = pendingJoinRoomCode;
+      setRoomName(code);
+      setPendingJoinRoomCode(null);
+      void joinRoom(undefined, code);
+    }
+  }, [pendingJoinRoomCode]);
+
   if (joinDetails) {
-    return <LiveKitRoom token={joinDetails.token} serverUrl={joinDetails.serverUrl} connect audio video onError={(roomError) => setError(roomError.message)}><RoomAudioRenderer /><RoomContent roomName={joinDetails.roomName} displayName={joinDetails.displayName} token={joinDetails.token} onLeave={() => { setJoinDetails(null); setError(''); }} /></LiveKitRoom>;
+    return <LiveKitRoom token={joinDetails.token} serverUrl={joinDetails.serverUrl} connect audio={false} video={false} onError={(roomError) => setError(roomError.message)}><RoomAudioRenderer /><RoomContent roomName={joinDetails.roomName} displayName={joinDetails.displayName} token={joinDetails.token} onLeave={() => { setJoinDetails(null); setError(''); }} /></LiveKitRoom>;
   }
 
   return (

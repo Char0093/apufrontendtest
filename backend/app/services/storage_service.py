@@ -53,3 +53,15 @@ class StorageService:
 
     def get_file(self, relative_path: str) -> bytes:
         return (self.base_path / relative_path).read_bytes()
+
+    def delete_meeting_files(self, meeting_id: str) -> None:
+        """Deletes all storage files (raw video, extracted audio, transcript, summary, exports) for a meeting."""
+        for sub in _SUBDIRS:
+            sub_dir = self.base_path / sub
+            if not sub_dir.exists():
+                continue
+            for file_path in sub_dir.glob(f"{meeting_id}*"):
+                try:
+                    file_path.unlink()
+                except Exception:
+                    pass

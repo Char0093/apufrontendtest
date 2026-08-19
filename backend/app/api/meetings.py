@@ -1,9 +1,10 @@
+from pydantic import BaseModel
 import json
 from pathlib import Path
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.logger import get_logger
@@ -16,7 +17,7 @@ from app.schemas.meeting import (
     MeetingStatusResponse,
 )
 from app.services.storage_service import StorageService
-from app.tasks.meeting_tasks import process_meeting_task
+from app.tasks.meeting_tasks import process_meeting_task, run_meeting_pipeline_direct
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -37,6 +38,7 @@ def create_meeting(payload: MeetingCreate, db: Session = Depends(get_db)) -> Mee
 
 @router.post("/upload", response_model=MeetingCreateResponse, status_code=202)
 async def upload_meeting(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str | None = Form(None),
     project: str | None = Form(None),
@@ -57,8 +59,9 @@ async def upload_meeting(
     meeting.file_path = relative_path
     db.commit()
 
-    process_meeting_task.delay(meeting.id)
-    logger.info(f"Meeting {meeting.id} uploaded ({len(content)} bytes), queued for processing")
+    # Launch directly in FastAPI BackgroundTasks (immediate execution without Celery daemon)
+    background_tasks.add_task(run_meeting_pipeline_direct, meeting.id)
+    logger.info(f"Meeting {meeting.id} uploaded ({len(content)} bytes), started direct background processing")
 
     return MeetingCreateResponse(meeting_id=meeting.id)
 
@@ -104,6 +107,10 @@ def list_meetings(
     items: list[MeetingListItem] = []
     for meeting in query.order_by(Meeting.created_at.desc()).all():
         summary = _load_json(f"summaries/{meeting.id}.json")
+        if summary is not None and meeting.status.lower() in ["processing", "queued", "preprocessing", "asr", "llm", "graph"]:
+            meeting.status = "completed"
+            meeting.progress = 100
+            db.commit()
         participants = summary.get("participants", []) if summary else []
 
         if participant and participant not in participants:
@@ -237,3 +244,78 @@ def _load_json(relative_path: str) -> dict | None:
         return json.loads(storage.get_file(relative_path))
     except FileNotFoundError:
         return None
+
+
+class AnalyzeTranscriptRequest(BaseModel):
+    transcript: list[dict]
+    detected_names: list[str] = []
+
+
+@router.post("/analyze-transcript")
+@router.post("/meetings/analyze-transcript")
+def analyze_transcript_endpoint(req: AnalyzeTranscriptRequest):
+    from app.services import gemini_service
+
+    if not req.transcript:
+        return {
+            "summary": "Meeting concluded without transcript dialogue.",
+            "participants": req.detected_names,
+            "decisions": [],
+            "action_items": [],
+            "knowledge_triples": [],
+            "risks": []
+        }
+
+    transcript_text = "\n".join(
+        f"[{line.get('timestamp', '00:00:00')}] {line.get('speaker', 'Speaker')}: {line.get('text', '')}"
+        for line in req.transcript
+    )
+
+    try:
+        analysis = gemini_service.run_gemini_analysis(transcript_text, req.detected_names)
+        return analysis
+    except Exception as exc:
+        logger.warning(f"AI transcript analysis fallback triggered: {exc}")
+        all_speakers = list(dict.fromkeys([line.get("speaker", "Speaker") for line in req.transcript if line.get("speaker")]))
+        full_text = " ".join([line.get("text", "") for line in req.transcript])
+        
+        return {
+            "summary": f"Discussion between {', '.join(all_speakers)}: {full_text[:200]}..." if len(full_text) > 200 else f"Discussion between {', '.join(all_speakers)}: {full_text}",
+            "participants": all_speakers,
+            "decisions": [],
+            "action_items": [],
+            "knowledge_triples": [{"subject": spk, "predicate": "PARTICIPATED_IN", "object": "Live Session"} for spk in all_speakers],
+            "risks": []
+        }
+
+
+@router.delete("/meeting/{meeting_id}", status_code=200)
+def delete_meeting(meeting_id: str, db: Session = Depends(get_db)) -> dict:
+    from app.graph import graph_builder
+    from app.services import embedding_service
+
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if meeting is not None:
+        # Delete task records
+        db.query(ProcessingTask).filter(ProcessingTask.meeting_id == meeting_id).delete()
+        # Delete Meeting row
+        db.delete(meeting)
+        db.commit()
+
+    # Delete storage artifacts
+    storage.delete_meeting_files(meeting_id)
+
+    # Delete graph nodes & edges from Neo4j
+    try:
+        graph_builder.delete_meeting_nodes(meeting_id)
+    except Exception as e:
+        logger.warning(f"Failed to delete meeting {meeting_id} from Neo4j: {e}")
+
+    # Delete vector embeddings from ChromaDB
+    try:
+        embedding_service.delete_meeting(meeting_id)
+    except Exception as e:
+        logger.warning(f"Failed to delete meeting {meeting_id} from ChromaDB: {e}")
+
+    logger.info(f"Meeting {meeting_id} deleted successfully from database, Neo4j, ChromaDB, and storage")
+    return {"status": "deleted", "meeting_id": meeting_id}

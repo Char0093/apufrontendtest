@@ -1,3 +1,22 @@
+const formatDisplayDateTime = (dateTimeStr?: string): string => {
+  if (!dateTimeStr) return 'Recently';
+  if (!dateTimeStr.includes('T') && !dateTimeStr.includes('Z')) return dateTimeStr;
+  try {
+    const d = new Date(dateTimeStr);
+    if (isNaN(d.getTime())) return dateTimeStr;
+    return d.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return dateTimeStr.split('T')[0] || dateTimeStr;
+  }
+};
+
 import React, { useState } from 'react';
 import { Meeting } from '../types';
 import { useApp } from '../context/AppContext';
@@ -81,7 +100,7 @@ export const MeetingCard: React.FC<MeetingCardProps> = ({
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-1.5">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span>{meeting.dateTime}</span>
+            <span>{formatDisplayDateTime(meeting.dateTime)}</span>
           </div>
           {meeting.duration && (
             <div className="flex items-center gap-1.5">

@@ -157,3 +157,17 @@ def query_similar_decisions(decision_text: str, exclude_meeting_id: str, n_resul
             if len(matches) >= n_results:
                 break
     return matches
+
+def delete_meeting(meeting_id: str) -> None:
+    """Delete vector embeddings for meeting_id from meeting_snippets and decisions collections."""
+    try:
+        snippets = get_snippets_collection()
+        snippets.delete(where={"meeting_id": meeting_id})
+    except Exception as e:
+        logger.warning(f"ChromaDB snippets delete for meeting {meeting_id} failed: {e}")
+
+    try:
+        decisions = get_decisions_collection()
+        decisions.delete(where={"meeting_id": meeting_id})
+    except Exception as e:
+        logger.warning(f"ChromaDB decisions delete for meeting {meeting_id} failed: {e}")

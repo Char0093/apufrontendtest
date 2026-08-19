@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { MeetingIntelligenceOverview } from './MeetingIntelligenceOverview';
 import { MeetingDetailView } from './MeetingDetailView';
@@ -7,10 +7,27 @@ import { Meeting } from '../types';
 export const MeetingIntelligenceView: React.FC = () => {
   const { meetings, currentUser, openDmWithUser } = useApp();
 
-  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
-  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  // Robust selectedMeetingId state with sessionStorage persistence across refreshes
+  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem('cb_selected_meeting_id') || null;
+    } catch {
+      return null;
+    }
+  });
 
-  // Strict user-based filtering: ONLY show meetings where currentUser is in participants!
+  useEffect(() => {
+    try {
+      if (selectedMeetingId) {
+        sessionStorage.setItem('cb_selected_meeting_id', selectedMeetingId);
+      } else {
+        sessionStorage.removeItem('cb_selected_meeting_id');
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [selectedMeetingId]);
+
   const currentUserMeetings = useMemo(() => {
     return meetings.filter(m => {
       if (!m.participants) return false;
@@ -22,14 +39,17 @@ export const MeetingIntelligenceView: React.FC = () => {
     });
   }, [meetings, currentUser]);
 
+  const selectedMeeting = useMemo(() => {
+    if (!selectedMeetingId) return null;
+    return meetings.find(m => m.id === selectedMeetingId) || null;
+  }, [selectedMeetingId, meetings]);
+
   const handleSelectMeeting = (meeting: Meeting) => {
-    setSelectedMeeting(meeting);
     setSelectedMeetingId(meeting.id);
   };
 
   const handleBackToOverview = () => {
     setSelectedMeetingId(null);
-    setSelectedMeeting(null);
   };
 
   const handleSendDirectMessage = (recipientName: string, text: string) => {
@@ -38,13 +58,14 @@ export const MeetingIntelligenceView: React.FC = () => {
 
   return (
     <div className="max-w-[1920px] w-full mx-auto px-8 py-6 animate-fade-in font-sans">
-      {selectedMeetingId && (selectedMeeting || currentUserMeetings.find(m => m.id === selectedMeetingId)) ? (
+      {selectedMeetingId && selectedMeeting ? (
         <MeetingDetailView
           selectedMeetingId={selectedMeetingId}
-          meeting={selectedMeeting || undefined}
-          meetings={currentUserMeetings}
+          meeting={selectedMeeting}
+          meetings={meetings}
           currentUser={currentUser}
           onBackToDashboard={handleBackToOverview}
+          onClose={handleBackToOverview}
           onSendDirectMessage={handleSendDirectMessage}
         />
       ) : (
@@ -57,4 +78,3 @@ export const MeetingIntelligenceView: React.FC = () => {
     </div>
   );
 };
-

@@ -47,7 +47,7 @@ def parse_analysis_response(raw: str) -> MeetingAnalysis:
     return MeetingAnalysis.model_validate(data)
 
 
-def call_agnes_api(messages: list, model: str = "agnes-2.0-flash") -> str:
+def call_agnes_api(messages: list, model: str = "agnes-2.5-pro") -> str:
     """OpenAI-compatible chat completion call to Agnes AI, with 429 backoff.
     Shared by gemini_service (text fallback) and vision_service (vision
     fallback)."""
@@ -59,10 +59,10 @@ def call_agnes_api(messages: list, model: str = "agnes-2.0-flash") -> str:
     payload = {"model": model, "messages": messages}
     data_bytes = json.dumps(payload).encode("utf-8")
 
-    for attempt in range(4):
+    for attempt in range(2):
         try:
             req = urllib.request.Request(url, data=data_bytes, headers=headers)
-            with urllib.request.urlopen(req, timeout=35) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 res = json.loads(resp.read().decode("utf-8"))
                 return res["choices"][0]["message"]["content"]
         except Exception as e:
@@ -75,9 +75,9 @@ def call_agnes_api(messages: list, model: str = "agnes-2.0-flash") -> str:
 
 
 def run_gemini_analysis(transcript_text: str, detected_names: Optional[List[str]] = None) -> dict:
-    """Send transcript to Gemini (primary) / Agnes AI (fallback) for speaker
-    name mapping + decision/action-item extraction. Returns a dict shaped
-    like MeetingAnalysis (participants/speaker_map/decisions/action_items)."""
+    """Extract speaker mapping, decisions, and action items.
+    PRIMARY: Gemini 2.5 Flash (Super-fast, high accuracy).
+    FALLBACK: Agnes AI (agnes-2.5-pro)."""
     names_str = ", ".join(detected_names) if detected_names else "None detected from video frames"
 
     prompt = f"""
@@ -88,14 +88,20 @@ The transcript currently has speaker IDs like SPEAKER_01, SPEAKER_02, etc.
 The following participant names were DETECTED from video nameplates/tiles by Vision AI:
 [{names_str}]
 
-Analyze the conversation carefully to determine each speaker's real identity.
-Assign each speaker ID to one of the detected participant names above (or infer their real name if not in the list).
-Do NOT output generic labels like "Unknown Speaker X". Use the actual names detected above!
+Analyze the conversation carefully to determine each speaker's real identity:
+1. Match each SPEAKER_XX to one of the detected participant names above.
+2. If there are more speakers in the transcript than detected names, analyze how speakers greet or address each other in dialogue (e.g., "Thanks John", "Hey Sarah, what do you think?", "Good point Duncan") to infer their real names.
+3. Make sure EVERY unique SPEAKER_XX is assigned a real person's name (never leave generic 'SPEAKER_XX' or 'Unknown').
+4. The 'participants' list in your JSON output MUST include ALL people who spoke or attended the meeting.
 
 **PART 2 — EXTRACT INTELLIGENCE**
 From the transcript, extract a concise summary, decisions, action items,
-risks, and factual knowledge triples. Decision confidence must be one of
-"firm_commitment" | "soft_agreement" | "unresolved".
+risks, and factual knowledge triples.
+
+**CRITICAL RULES FOR ACTION ITEMS & DECISIONS:**
+1. `task`: MUST be a short, clear, action-oriented summary title (maximum 8–15 words, e.g., "Log in to portal and complete initial post"). NEVER copy long verbatim transcript speech, conversational script, or verbal filler like "Oh, it's really easy to be honest..."!
+2. `title`: MUST be a clear, concise decision title (maximum 8–15 words).
+3. Decision confidence must be one of "firm_commitment" | "soft_agreement" | "unresolved".
 
 **Meeting Transcript:**
 {transcript_text}
@@ -131,38 +137,65 @@ risks, and factual knowledge triples. Decision confidence must be one of
 """
 
     try:
-        raw = ""
+        # 1. PRIMARY: Gemini Flash (using new fresh API key)
         if settings.gemini_api_key:
-            logger.info("Running Gemini 2.0 Flash analysis...")
-            from google import genai
-            client = genai.Client(api_key=settings.gemini_api_key)
-            for attempt in range(2):
-                try:
-                    response = client.models.generate_content(
-                        model="gemini-2.0-flash",
-                        contents=prompt,
-                        config={"response_mime_type": "application/json"},
-                    )
-                    return parse_analysis_response(response.text).model_dump()
-                except Exception as gemini_ex:
-                    logger.warning(
-                        "Gemini analysis attempt %s/2 failed validation or request: %s",
-                        attempt + 1,
-                        gemini_ex,
-                    )
+            try:
+                from google import genai
+                from google.genai import types
+                client = genai.Client(api_key=settings.gemini_api_key)
+                for model_name in ["gemini-flash-latest"]:
+                    for attempt in range(3):
+                        try:
+                            print(f"[GEMINI AI] >> Running intelligence extraction with {model_name} (attempt {attempt+1}/3)...", flush=True)
+                            response = client.models.generate_content(
+                                model=model_name,
+                                contents=prompt,
+                                config=types.GenerateContentConfig(response_mime_type="application/json"),
+                            )
+                            if response.text:
+                                parsed = parse_analysis_response(response.text).model_dump()
+                                print(f"[GEMINI AI] >> Extracted {len(parsed.get('decisions', []))} decisions and {len(parsed.get('action_items', []))} action items via Gemini!", flush=True)
+                                logger.info(f"Successfully extracted intelligence with {model_name}")
+                                return parsed
+                        except Exception as gemini_ex:
+                            err_s = str(gemini_ex)
+                            if ("503" in err_s or "demand" in err_s.lower() or "429" in err_s) and attempt < 2:
+                                print(f"[GEMINI AI] >> 503 temporary spike on {model_name}, retrying in 2.5s...", flush=True)
+                                time.sleep(2.5)
+                                continue
+                            logger.warning(f"Model {model_name} notice: {gemini_ex}")
+                            break
+            except Exception as g_err:
+                logger.warning(f"Gemini setup notice: {g_err}")
 
-        if not raw and settings.agnes_api_key:
-            logger.info("Running Agnes AI Flash analysis...")
-            messages = [{"role": "user", "content": prompt}]
-            raw = call_agnes_api(messages, model="agnes-2.0-flash")
+        # 2. FALLBACK: Agnes AI (agnes-2.5-pro)
+        if settings.agnes_api_key:
+            try:
+                print("[AGNES AI] >> Running fallback extraction with Agnes AI (agnes-2.5-pro)...", flush=True)
+                logger.info("Running Agnes AI fallback analysis...")
+                messages = [{"role": "user", "content": prompt}]
+                raw = call_agnes_api(messages, model="agnes-2.0-flash")
+                if raw:
+                    parsed = parse_analysis_response(raw).model_dump()
+                    print(f"[AGNES AI] >> Extracted {len(parsed.get('decisions', []))} decisions via Agnes AI!", flush=True)
+                    return parsed
+            except Exception as agnes_err:
+                logger.warning(f"Agnes AI analysis failed: {agnes_err}")
 
-        if raw:
-            return parse_analysis_response(raw).model_dump()
-        raise ValueError("No meeting-intelligence API is configured")
+        raise ValueError("No meeting-intelligence API returned a valid response")
     except Exception as e:
         logger.warning(f"AI analysis failed: {e}. Using fallback extraction.")
         return fallback_analysis(transcript_text, detected_names)
 
+
+def _clean_task_description(txt: str) -> str:
+    """Sanitize task description to a clean 8-15 word action title."""
+    cleaned = txt.strip()
+    cleaned = re.sub(r'^(i will|i\'ll|we will|we\'ll|please|can you|let\'s)\s+', '', cleaned, flags=re.IGNORECASE)
+    words = cleaned.split()
+    if len(words) > 15:
+        cleaned = " ".join(words[:12]) + "..."
+    return cleaned.capitalize() if cleaned else "Follow up on discussion item"
 
 def fallback_analysis(transcript_text: str, detected_names: Optional[List[str]] = None) -> dict:
     """Keyword-heuristic extraction when Gemini/Agnes both fail (rate limits,
@@ -185,10 +218,11 @@ def fallback_analysis(transcript_text: str, detected_names: Optional[List[str]] 
                 txt = spk_parts[1].strip()
 
         l_lower = txt.lower()
+        cleaned_task = _clean_task_description(txt)
         if any(w in l_lower for w in ["decide", "agree", "confirm", "approve", "settle", "must", "wise", "compulsory"]):
-            decisions.append({"text": txt, "confidence": "firm_commitment", "timestamp": ts, "speaker": spk})
+            decisions.append({"text": cleaned_task, "confidence": "firm_commitment", "timestamp": ts, "speaker": spk})
         elif any(w in l_lower for w in ["action", "task", "todo", "post", "send", "submit", "check", "need to"]):
-            action_items.append({"task": txt, "assignee": spk, "deadline": "End of week", "priority": "high"})
+            action_items.append({"task": cleaned_task, "assignee": spk, "deadline": "End of week", "priority": "high"})
 
     return {
         "summary": "Meeting transcript processed with deterministic fallback extraction.",

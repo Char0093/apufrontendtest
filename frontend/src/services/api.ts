@@ -258,7 +258,7 @@ const CONFIDENCE_SCORE: Record<string, number> = {
   unresolved: 40,
 };
 
-function toDecision(d: BackendDecision, meetingId: string, idx: number): Decision {
+export function toDecision(d: BackendDecision, meetingId: string, idx: number): Decision {
   return {
     id: `${meetingId}-decision-${idx}`,
     title: d.title || d.text,
@@ -269,7 +269,7 @@ function toDecision(d: BackendDecision, meetingId: string, idx: number): Decisio
   };
 }
 
-function toActionItem(a: BackendActionItem, meetingId: string, idx: number): ActionItem {
+export function toActionItem(a: BackendActionItem, meetingId: string, idx: number): ActionItem {
   const priority = a.priority || 'medium';
   return {
     id: `${meetingId}-action-${idx}`,
@@ -430,4 +430,62 @@ export function backendListItemToMeeting(item: BackendMeetingListItem): Meeting 
     transcript: [],
     contradictions: [],
   };
+}
+
+export async function analyzeTranscript(
+  transcript: Array<{ speaker: string; text: string; timestamp: string }>,
+  detectedNames: string[] = []
+): Promise<{
+  summary: string;
+  participants: string[];
+  decisions: Array<{
+    title: string;
+    reason?: string;
+    evidence?: string;
+    confidence?: string;
+    timestamp?: string;
+    speaker?: string;
+  }>;
+  action_items: Array<{
+    task: string;
+    assignee?: string;
+    deadline?: string;
+    priority?: string;
+  }>;
+  knowledge_triples?: Array<{ subject: string; predicate: string; object: string }>;
+}> {
+  try {
+    const res = await fetch(`${API_BASE}/analyze-transcript`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcript, detected_names: detectedNames }),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn('Backend analyze-transcript error, using local analysis:', err);
+  }
+
+  // Fallback intelligent summary directly derived from transcript
+  const allSpeakers = Array.from(new Set(transcript.map((t) => t.speaker).filter(Boolean)));
+  const fullText = transcript.map((t) => `${t.speaker}: ${t.text}`).join(' ');
+
+  return {
+    summary: fullText.length > 20 ? `Live discussion covering: ${transcript.map(t => t.text).join(' ')}` : 'Live session completed.',
+    participants: allSpeakers,
+    decisions: [],
+    action_items: [],
+    knowledge_triples: allSpeakers.map(spk => ({ subject: spk, predicate: 'PARTICIPATED_IN', object: 'Live Meeting' }))
+  };
+}
+
+
+export async function deleteMeeting(meetingId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/meeting/${meetingId}`, { method: 'DELETE' });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

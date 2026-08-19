@@ -1,3 +1,4 @@
+import { useTheme } from '../context/ThemeContext';
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
@@ -33,8 +34,8 @@ export const SettingsView: React.FC = () => {
   const [phone, setPhone] = useState(currentUser.phone || '+1 (555) 123-4567');
   const [avatarUrl, setAvatarUrl] = useState(currentUser.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80');
 
-  // Theme Mode State
-  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('dark');
+  // Theme Mode from Global Persistent Context
+  const { theme: themeMode, setTheme: handleThemeChange } = useTheme();
   const [showToast, setShowToast] = useState(false);
 
   useEffect(() => {
@@ -46,20 +47,7 @@ export const SettingsView: React.FC = () => {
     setAvatarUrl(currentUser.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80');
   }, [currentUser]);
 
-  const handleThemeChange = (mode: 'light' | 'dark' | 'system') => {
-    setThemeMode(mode);
-    if (mode === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else if (mode === 'light') {
-      document.documentElement.classList.remove('dark');
-    } else {
-      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    }
-  };
+
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();

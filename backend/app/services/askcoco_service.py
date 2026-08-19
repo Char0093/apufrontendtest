@@ -260,7 +260,7 @@ markdown/bullet formatting.
 Question: {query}
 Data (kind={kind}): {results[:15]}
 """
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        response = client.models.generate_content(model="gemini-flash-latest", contents=prompt)
         text = (response.text or "").strip()
         return text or None
     except Exception as exc:

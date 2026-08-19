@@ -51,12 +51,48 @@ export const ActionItemsTable: React.FC<ActionItemsTableProps> = ({
     }
   }, [globalUser?.name]);
 
-  // Helper to safely extract string name from assignee (supports string or object with name)
+  // Helper to safely extract string name from assignee
   const getAssigneeName = (assignee: any): string => {
-    if (!assignee) return '';
+    if (!assignee) return 'Participant';
     if (typeof assignee === 'string') return assignee;
     if (typeof assignee === 'object' && assignee.name) return assignee.name;
     return String(assignee);
+  };
+
+  const formatTaskDescription = (taskText: string): string => {
+    if (!taskText) return 'Complete action item';
+    let text = taskText.trim();
+
+    const fillers = [
+      /^oh,?\s+it'?s\s+really\s+easy\s+to\s+be\s+honest\.?\s*/i,
+      /^yeah\.?\s+no\.?\s+i\s+was\s+just\s+gonna\s+say,?\s+like,?\s*/i,
+      /^excuse\s+me\.?\s+yes\.?\s+mister\s+\w+\.?\s*/i,
+      /^i\s+mean,?\s+it'?s\s+so\s+easy\.?\s*/i,
+      /^so\s+that'?s\s+why\s+i'?m\s+just\s+asking,?\s+like,?\s*/i,
+      /^you\s+know\?\s*/i,
+      /^to\s+be\s+honest,?\s*/i,
+      /^right\?\s*so\s+we\s+just\s*/i,
+    ];
+
+    fillers.forEach((regex) => {
+      text = text.replace(regex, '');
+    });
+
+    if (text.length > 80) {
+      const sentences = text.split(/(?<=[.?!])\s+/);
+      const actionSentence = sentences.find((s) =>
+        /log in|post|obtain|certif|open|terminal|screenshot|verify|check|submit|create|update|confirm|run/i.test(s)
+      );
+
+      let chosen = actionSentence || sentences[0] || text;
+      chosen = chosen.trim();
+      if (chosen.length > 90) {
+        chosen = chosen.slice(0, 87) + '...';
+      }
+      return chosen.charAt(0).toUpperCase() + chosen.slice(1);
+    }
+
+    return text.charAt(0).toUpperCase() + text.slice(1);
   };
 
   const handleToggleStatus = async (item: ActionItem) => {
@@ -168,7 +204,7 @@ export const ActionItemsTable: React.FC<ActionItemsTableProps> = ({
                         <div className="flex items-start gap-2">
                           <span className="mt-0.5 text-blue-600 dark:text-blue-400 font-bold text-xs">•</span>
                           <span className={isCompleted ? 'line-through text-slate-400 dark:text-slate-500' : ''}>
-                            {item.task}
+                            {formatTaskDescription(item.task)}
                           </span>
                         </div>
                       </td>

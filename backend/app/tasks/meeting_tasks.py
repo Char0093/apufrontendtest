@@ -61,7 +61,7 @@ def _analyze_transcript(
     }
     speaker_map = vision_service.map_speakers_to_names(segments, name_timestamps, ai_speaker_map)
     for seg in segments:
-        seg["speaker"] = speaker_map.get(seg["speaker"], seg["speaker"])
+        seg["speaker"] = speaker_map.get(seg["speaker"], speaker_map.get(seg.get("speaker_raw", ""), seg["speaker"]))
 
     last_sec = max((s.get("start", 0) for s in segments), default=0)
     h, m, sec = int(last_sec // 3600), int((last_sec % 3600) // 60), int(last_sec % 60)
@@ -81,8 +81,33 @@ def _analyze_transcript(
             )
             for s in segments
         ],
-        decisions=[Decision(**d) for d in analysis_dict.get("decisions", [])],
-        action_items=[ActionItem(**a) for a in analysis_dict.get("action_items", [])],
+        decisions=[
+            Decision(
+                **{
+                    **d,
+                    "speaker": speaker_map.get(d.get("speaker", ""), d.get("speaker", "")),
+                    "evidence": (
+                        d.get("evidence") and (
+                            lambda ev: [
+                                (ev := __import__("re").sub(rf"\b{spk}\b", name, ev))
+                                for spk, name in speaker_map.items()
+                                if name and "speaker" not in name.lower()
+                            ] and ev
+                        )(d.get("evidence"))
+                    ) or d.get("evidence", "")
+                }
+            )
+            for d in analysis_dict.get("decisions", [])
+        ],
+        action_items=[
+            ActionItem(
+                **{
+                    **a,
+                    "assignee": speaker_map.get(a.get("assignee", ""), a.get("assignee", ""))
+                }
+            )
+            for a in analysis_dict.get("action_items", [])
+        ],
         flags=[],
         risks=analysis_dict.get("risks", []),
         knowledge_triples=analysis_dict.get("knowledge_triples", []),
@@ -109,16 +134,21 @@ def _run_pipeline(meeting: Meeting, on_progress) -> MeetingIntelligence:
     raw_path = str((storage.base_path / meeting.file_path).resolve())
     audio_path = str(storage.base_path / "audio" / f"{meeting.id}.wav")
 
-    on_progress(15, "Extracting audio...")
+    on_progress(15, "Extracting audio (ffmpeg: video → 16kHz WAV)...")
     audio_path = asr_service.extract_audio(raw_path, audio_path)
 
-    on_progress(30, "Transcribing with Deepgram...")
+    on_progress(35, "Speaker diarization & Deepgram transcription...")
     segments = asr_service.run_deepgram_transcription(audio_path)
 
+    on_progress(55, "Aligning speech segments...")
     name_timestamps: dict = {}
     if Path(raw_path).suffix.lower() in _VIDEO_EXTENSIONS:
-        on_progress(45, "Reading participant names from video (Vision)...")
-        name_timestamps = vision_service.extract_names_from_video(raw_path)
+        on_progress(65, "Gemini Vision reading nameplates...")
+        try:
+            name_timestamps = vision_service.extract_names_from_video(raw_path)
+        except Exception as ve:
+            logger.warning(f"Vision name extraction skipped: {ve}")
+
     all_detected_names = list({n for names in name_timestamps.values() for n in names})
 
     return _analyze_transcript(meeting, segments, on_progress, name_timestamps, all_detected_names)
@@ -159,7 +189,8 @@ def _process_meeting(task, meeting_id: str, run_pipeline) -> None:
     """Generic status/retry shell shared by process_meeting_task and
     process_live_meeting_task below — the only thing that differs between
     an upload and a live call is how MeetingIntelligence gets produced."""
-    logger.info(f"Processing meeting {meeting_id} (attempt {task.request.retries + 1})")
+    retries = task.request.retries if (task and hasattr(task, 'request') and hasattr(task.request, 'retries')) else 0
+    logger.info(f"Processing meeting {meeting_id} (attempt {retries + 1})")
     db = SessionLocal()
     try:
         meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
@@ -169,7 +200,7 @@ def _process_meeting(task, meeting_id: str, run_pipeline) -> None:
 
         task_record = _get_or_create_task_record(db, meeting_id)
         task_record.status = "processing"
-        task_record.retry_count = task.request.retries
+        task_record.retry_count = retries
         meeting.status = "processing"
         meeting.progress = 5
         db.commit()
@@ -193,22 +224,27 @@ def _process_meeting(task, meeting_id: str, run_pipeline) -> None:
 
     except Exception as exc:
         db.rollback()
+        print(f"[PIPELINE ERROR] >> Meeting {meeting_id} failed: {exc}", flush=True)
         logger.error(f"Meeting {meeting_id} processing failed: {exc}", exc_info=True)
 
         meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
         task_record = _get_or_create_task_record(db, meeting_id)
         task_record.error_message = str(exc)
-        task_record.retry_count = task.request.retries
+        
+        has_celery = bool(task and hasattr(task, 'request') and hasattr(task.request, 'retries'))
+        retries_count = task.request.retries if has_celery else 0
+        task_record.retry_count = retries_count
 
-        is_final_attempt = task.request.retries >= task.max_retries
+        is_final_attempt = (task.request.retries >= task.max_retries) if has_celery else True
         task_record.status = "failed" if is_final_attempt else "retrying"
         if meeting is not None:
             meeting.status = "failed" if is_final_attempt else "retrying"
+            meeting.progress = 0
         db.commit()
 
         if is_final_attempt:
-            logger.error(f"Meeting {meeting_id} failed after {task.request.retries + 1} attempts")
-        else:
+            logger.error(f"Meeting {meeting_id} failed permanently: {exc}")
+        elif has_celery:
             raise task.retry(exc=exc, countdown=2**task.request.retries)
     finally:
         db.close()
@@ -231,3 +267,16 @@ def process_live_meeting_task(self, meeting_id: str) -> None:
         return _analyze_transcript(meeting, segments, on_progress)
 
     _process_meeting(self, meeting_id, run_pipeline)
+
+def run_meeting_pipeline_direct(meeting_id: str) -> None:
+    """Runs the pipeline directly in FastAPI BackgroundTasks without needing a Celery daemon."""
+    _process_meeting(None, meeting_id, _run_pipeline)
+
+
+def run_live_meeting_pipeline_direct(meeting_id: str) -> None:
+    """Runs live meeting analysis directly in FastAPI BackgroundTasks."""
+    def run_pipeline(meeting: Meeting, on_progress) -> MeetingIntelligence:
+        segments = storage.get_live_segments(meeting_id)
+        return _analyze_transcript(meeting, segments, on_progress)
+
+    _process_meeting(None, meeting_id, run_pipeline)

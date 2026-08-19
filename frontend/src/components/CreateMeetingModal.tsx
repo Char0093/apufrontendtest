@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   X, 
+  KeyRound, 
+  Hash, 
   Calendar, 
   Clock, 
   Users, 
@@ -24,6 +26,20 @@ export const CreateMeetingModal: React.FC = () => {
   const [startTime, setStartTime] = useState('14:00');
   const [endTime, setEndTime] = useState('15:00');
   const [department, setDepartment] = useState('Engineering & AI');
+
+  // Random 5-character alphanumeric room code generator (e.g. B7M3P)
+  const generateRoomCode = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return Array.from({ length: 5 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
+  };
+
+  const [roomCode, setRoomCode] = useState(generateRoomCode());
+
+  useEffect(() => {
+    if (isCreateMeetingOpen) {
+      setRoomCode(generateRoomCode());
+    }
+  }, [isCreateMeetingOpen]);
   
   // Find current organizer employee
   const organizerEmp = employees.find(e => e.name.toLowerCase() === currentUser.name.toLowerCase());
@@ -119,7 +135,8 @@ export const CreateMeetingModal: React.FC = () => {
         startTime,
         endTime,
         department,
-        participantIds: selectedParticipantIds
+        participantIds: selectedParticipantIds,
+        roomCode
       });
       setIsSubmitting(false);
       // Reset state
@@ -173,6 +190,31 @@ export const CreateMeetingModal: React.FC = () => {
                 required
               />
             </div>
+          </div>
+
+          {/* Random 5-Digit / Alphanumeric Meeting Room Code */}
+          <div className="p-3.5 bg-blue-50/60 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-2xl flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
+                <Hash className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                  Assigned Meeting Room Code (5-Digit)
+                </span>
+                <div className="text-sm font-extrabold font-mono text-slate-900 dark:text-white tracking-widest">
+                  {roomCode}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setRoomCode(generateRoomCode())}
+              className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline px-2.5 py-1 bg-white dark:bg-slate-800 border border-blue-200 dark:border-blue-700 rounded-xl transition-colors cursor-pointer"
+            >
+              Regenerate Code
+            </button>
           </div>
 
           {/* Project Category & Date */}

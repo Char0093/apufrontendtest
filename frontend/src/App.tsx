@@ -1,3 +1,4 @@
+import { ThemeProvider } from './context/ThemeContext';
 import React from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { NotificationProvider } from './context/NotificationContext';
@@ -61,11 +62,13 @@ const MainAppContent: React.FC = () => {
 
 export function App() {
   return (
-    <AppProvider>
-      <NotificationProvider>
-        <MainAppContent />
-      </NotificationProvider>
-    </AppProvider>
+    <ThemeProvider>
+      <AppProvider>
+        <NotificationProvider>
+          <MainAppContent />
+        </NotificationProvider>
+      </AppProvider>
+    </ThemeProvider>
   );
 }
 

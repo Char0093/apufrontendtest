@@ -1,3 +1,4 @@
+import { buildLocalMeetingGraph } from '../services/api';
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { GraphData, GraphNode, Meeting } from '../types';
@@ -116,46 +117,93 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
   }, [currentMeetingId]);
 
   const activeGraphData: GraphData = useMemo(() => {
-    if (selectedMeetingId !== 'ALL' && completedMeetings.length > 0) {
-      const targetMtg = completedMeetings.find(m => m.id === selectedMeetingId);
-      if (targetMtg && targetMtg.graphData && targetMtg.graphData.nodes.length > 0) {
+    // 1. If viewing a specific single meeting (e.g. from MeetingDetailView tab or single filter)
+    if (selectedMeetingId !== 'ALL') {
+      // Prioritize directly passed single-meeting graphData if provided
+      if (data && data.nodes && data.nodes.length > 0 && currentMeetingId) {
         return {
-          nodes: targetMtg.graphData.nodes.map(n => ({ ...n })),
-          links: targetMtg.graphData.links.map(l => ({ ...l }))
+          nodes: data.nodes.map(n => ({ ...n })),
+          links: (data.links || []).map(l => ({
+            ...l,
+            source: typeof l.source === 'string' ? l.source : (l.source as any)?.id,
+            target: typeof l.target === 'string' ? l.target : (l.target as any)?.id
+          }))
+        };
+      }
+
+      // Otherwise look up the target meeting from meetings list
+      const targetMtg = (meetings || []).find(m => m.id === selectedMeetingId);
+      if (targetMtg) {
+        const local = buildLocalMeetingGraph(targetMtg);
+        return {
+          nodes: local.nodes.map(n => ({ ...n })),
+          links: local.links.map(l => ({
+            ...l,
+            source: typeof l.source === 'string' ? l.source : (l.source as any)?.id,
+            target: typeof l.target === 'string' ? l.target : (l.target as any)?.id
+          }))
         };
       }
     }
 
-    if (data && data.nodes && data.nodes.length > 0) {
-      if (selectedMeetingId !== 'ALL') {
-        const filteredNodes = data.nodes.filter(n => n.meetingId === selectedMeetingId);
-        const nodeIds = new Set(filteredNodes.map(n => n.id));
-        const filteredLinks = data.links.filter(l => nodeIds.has(l.source as string) && nodeIds.has(l.target as string));
+    // 2. Global Memory Graph ("ALL"): Build combined graph for ALL active completed meeting cards
+    const activeMeetings = completedMeetings;
+    const nodeMap = new Map<string, GraphNode>();
+    const linkMap = new Map<string, any>();
 
-        if (filteredNodes.length > 0) {
-          return {
-            nodes: filteredNodes.map(n => ({ ...n })),
-            links: filteredLinks.map(l => ({ ...l }))
-          };
+    // Add nodes & links from EVERY single active completed meeting
+    activeMeetings.forEach((m) => {
+      const local = buildLocalMeetingGraph(m);
+      local.nodes.forEach((n) => {
+        if (!nodeMap.has(n.id)) {
+          nodeMap.set(n.id, { ...n });
         }
-      }
+      });
+      local.links.forEach((l) => {
+        const s = typeof l.source === 'string' ? l.source : (l.source as any)?.id;
+        const t = typeof l.target === 'string' ? l.target : (l.target as any)?.id;
+        linkMap.set(`${s}->${t}:${l.label || (l as any).type}`, {
+          ...l,
+          source: s,
+          target: t,
+          label: l.label || (l as any).type
+        });
+      });
+    });
 
+    // Merge any backend contradiction links if both nodes exist in the active graph
+    if (data && data.links && data.links.length > 0) {
+      data.links.forEach((l) => {
+        const s = typeof l.source === 'string' ? l.source : (l.source as any)?.id;
+        const t = typeof l.target === 'string' ? l.target : (l.target as any)?.id;
+        if (nodeMap.has(s) && nodeMap.has(t)) {
+          linkMap.set(`${s}->${t}:${l.label || (l as any).type}`, {
+            ...l,
+            source: s,
+            target: t,
+            label: l.label || (l as any).type
+          });
+        }
+      });
+    }
+
+    if (nodeMap.size > 0) {
       return {
-        nodes: data.nodes.map(n => ({ ...n })),
-        links: data.links.map(l => ({ ...l }))
+        nodes: Array.from(nodeMap.values()).map(n => ({ ...n })),
+        links: Array.from(linkMap.values()).map(l => ({ ...l }))
       };
     }
 
-    const firstMtg = completedMeetings[0];
-    if (firstMtg?.graphData) {
+    // Fallback: if data was directly provided with nodes
+    if (data && data.nodes && data.nodes.length > 0) {
       return {
-        nodes: firstMtg.graphData.nodes.map(n => ({ ...n })),
-        links: firstMtg.graphData.links.map(l => ({ ...l }))
+        nodes: data.nodes.map(n => ({ ...n })),
+        links: (data.links || []).map(l => ({ ...l }))
       };
     }
 
     return { nodes: [], links: [] };
-  }, [selectedMeetingId, data, completedMeetings]);
+  }, [selectedMeetingId, currentMeetingId, completedMeetings, meetings, data]);
 
   // Configure force layout parameters & auto zoom-to-fit when active graph data changes
   useEffect(() => {

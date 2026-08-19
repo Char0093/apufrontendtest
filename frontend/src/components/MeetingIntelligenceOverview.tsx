@@ -1,283 +1,398 @@
 import React, { useState, useMemo } from 'react';
 import {
   BrainCircuit,
+  Loader2,
   Sparkles,
-  CheckSquare,
   Calendar,
-  ArrowRight,
-  Filter,
   Clock,
-  Layers,
-  CheckCircle2,
-  History,
-  Users
+  Users,
+  ChevronLeft,
+  ChevronRight,
+  Upload,
+  Video,
+  FileText,
+  Plus,
+  X,
+  Bot,
+  Trash2
 } from 'lucide-react';
-import { Meeting, Decision } from '../types';
+import { Meeting } from '../types';
+import { CocoProcessingModal } from './CocoProcessingModal';
+import { UploadModal } from './UploadModal';
+import { useApp } from '../context/AppContext';
 
-interface MeetingIntelligenceOverviewProps {
+interface Props {
   meetings: Meeting[];
   onSelectMeeting: (meeting: Meeting) => void;
   onSelectMeetingId: (meetingId: string) => void;
 }
 
-export const MeetingIntelligenceOverview: React.FC<MeetingIntelligenceOverviewProps> = ({
-  meetings,
-  onSelectMeeting,
-  onSelectMeetingId,
-}) => {
-  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
-  const [hubSearchQuery, setHubSearchQuery] = useState<string>('');
+const PAGE_SIZE = 6;
 
-  const completedMeetings = useMemo(() => {
-    return meetings.filter((m) => m.status === 'Completed');
+/* Classify the meeting origin */
+function meetingType(m: Meeting): 'scheduled' | 'live' | 'upload' {
+  // 1. Explicit uploaded video flags
+  if (m.audioFileName || (m as any).type === 'upload') {
+    return 'upload';
+  }
+
+  // 2. Scheduled / upcoming meetings
+  const lowerTitle = (m.title || '').toLowerCase();
+  if (
+    m.status === 'Scheduled' ||
+    m.id?.startsWith('mtg-sched') ||
+    lowerTitle.startsWith('upcoming:') ||
+    lowerTitle.startsWith('scheduled:')
+  ) {
+    return 'scheduled';
+  }
+
+  // 3. Live meetings (starts with 'Live:' or has active roomCode)
+  if (
+    m.roomCode ||
+    lowerTitle.startsWith('live:') ||
+    lowerTitle.startsWith('live room') ||
+    lowerTitle.startsWith('room:')
+  ) {
+    return 'live';
+  }
+
+  // 4. All uploaded and processed intelligence defaults to 'upload'
+  return 'upload';
+}
+
+const TypeBadge: React.FC<{ type: ReturnType<typeof meetingType> }> = ({ type }) => {
+  const cfg = {
+    scheduled: { label: 'Scheduled', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300', Icon: Calendar },
+    live: { label: 'Live Room', cls: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300', Icon: Video },
+    upload: { label: 'Uploaded', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300', Icon: Upload },
+  }[type];
+  const Icon = cfg.Icon;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${cfg.cls}`}>
+      <Icon className="w-2.5 h-2.5" />
+      {cfg.label}
+    </span>
+  );
+};
+
+export const MeetingIntelligenceOverview: React.FC<Props> = ({ meetings, onSelectMeeting }) => {
+  const { deleteMeeting, stopAllProcessing, processAudioForMeeting } = useApp();
+  const [page, setPage] = useState(0);
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'scheduled' | 'live' | 'upload'>('ALL');
+  const [search, setSearch] = useState('');
+
+  // Modals state
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [activeProcessingMeeting, setActiveProcessingMeeting] = useState<Meeting | null>(null);
+
+  // Truly active in-progress processing meetings (strictly exclude 'Failed', 'Scheduled', 'Completed')
+  const processing = useMemo(() => {
+    return meetings.filter(
+      (m) =>
+        m.status !== 'Completed' &&
+        m.status !== 'Scheduled' &&
+        m.status !== 'Failed' &&
+        ['Preprocessing', 'ASR', 'LLM', 'Graph', 'Retrying', 'Pending'].includes(m.status)
+    );
   }, [meetings]);
 
-  const metrics = useMemo(() => {
-    const totalDecisions = completedMeetings.reduce((acc, m) => acc + (m.decisions?.length || 0), 0);
-    const totalActionItems = completedMeetings.reduce((acc, m) => acc + (m.actionItems?.length || 0), 0);
-    const allConfidence = completedMeetings.flatMap(m => (m.decisions || []).map(d => d.confidenceScore));
-    const avgConfidence = allConfidence.length > 0 
-      ? Math.round(allConfidence.reduce((a, b) => a + b, 0) / allConfidence.length) 
-      : 95;
-    
-    return {
-      completedCount: completedMeetings.length,
-      totalDecisions,
-      totalActionItems,
-      avgConfidence
-    };
-  }, [completedMeetings]);
+  const completed = useMemo(
+    () => meetings.filter((m) => m.status === 'Completed'),
+    [meetings]
+  );
 
-  const filteredCompletedMeetings = useMemo(() => {
-    return completedMeetings.filter((mtg) => {
-      const matchesCategory = categoryFilter === 'ALL' || mtg.project === categoryFilter || mtg.decisions?.some(d => d.category === categoryFilter);
-      const matchesSearch = !hubSearchQuery.trim() || 
-        mtg.title.toLowerCase().includes(hubSearchQuery.toLowerCase()) ||
-        mtg.project.toLowerCase().includes(hubSearchQuery.toLowerCase()) ||
-        mtg.summary?.toLowerCase().includes(hubSearchQuery.toLowerCase()) ||
-        mtg.decisions?.some(d => d.title.toLowerCase().includes(hubSearchQuery.toLowerCase())) ||
-        mtg.actionItems?.some(a => a.task.toLowerCase().includes(hubSearchQuery.toLowerCase()) || a.assignee.toLowerCase().includes(hubSearchQuery.toLowerCase()));
-      
-      return matchesCategory && matchesSearch;
+  const filtered = useMemo(() => {
+    return completed.filter((m) => {
+      const mt = meetingType(m);
+      if (typeFilter !== 'ALL' && mt !== typeFilter) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        return (
+          m.title.toLowerCase().includes(q) ||
+          (m.participants || []).some((p) =>
+            (typeof p === 'string' ? p : (p as any).name || '').toLowerCase().includes(q)
+          )
+        );
+      }
+      return true;
     });
-  }, [completedMeetings, categoryFilter, hubSearchQuery]);
+  }, [completed, typeFilter, search]);
 
-  const getConfidenceScore = (meeting: Meeting) => {
-    if (!meeting.decisions || meeting.decisions.length === 0) return 95;
-    const total = meeting.decisions.reduce((acc, d) => acc + d.confidenceScore, 0);
-    return Math.round(total / meeting.decisions.length);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageItems = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+
+  const handleFilter = (f: typeof typeFilter) => {
+    setTypeFilter(f);
+    setPage(0);
   };
 
-  const timelineEntries = useMemo(() => {
-    return completedMeetings
-      .flatMap((mtg) =>
-        (mtg.decisions || []).map((decision) => ({ decision, meeting: mtg }))
-      )
-      .sort((a, b) => (a.meeting.dateTime < b.meeting.dateTime ? 1 : -1));
-  }, [completedMeetings]);
+  const handleDirectUpload = (newMeeting: Meeting) => {
+    setIsUploadModalOpen(false);
+    setActiveProcessingMeeting(newMeeting);
+  };
 
   return (
-    <div className="space-y-6 animate-fade-in pb-16 max-w-[1920px] w-full mx-auto px-8 py-6 font-sans">
-      
-      {/* Streamlined Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80 dark:border-slate-800">
+    <div className="max-w-6xl mx-auto px-6 py-6 space-y-8 font-sans animate-fade-in pb-24">
+
+      {/* ── Header Area ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-2 border-b border-slate-200/80 dark:border-slate-800">
+        <div className="space-y-1">
+          <div className="flex items-center space-x-3">
+            <span className="w-11 h-11 rounded-2xl bg-blue-600 flex items-center justify-center shrink-0 shadow-md shadow-blue-600/30 text-white">
+              <BrainCircuit className="w-6 h-6" />
+            </span>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
+                Meeting Intelligence
+              </h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                All analysed meetings — scheduled, live, and uploaded
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Big Blue "Upload Yourself" Button */}
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight font-sans flex items-center gap-2">
-            <BrainCircuit className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-            <span>Meeting Intelligence Hub</span>
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">
-            Cross-meeting decision analytics, AI-extracted rationale, and organizational memory index.
-          </p>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <span className="px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 text-xs font-bold border border-blue-200 dark:border-blue-800">
-            {metrics.completedCount} Indexed Meetings
-          </span>
+          <button
+            onClick={() => setIsUploadModalOpen(true)}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-extrabold rounded-2xl flex items-center gap-2.5 transition-all shadow-lg shadow-blue-600/25 cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Upload Yourself</span>
+          </button>
         </div>
       </div>
 
-      {/* Key Metrics Grid (3 Clean Cards Row) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        
-        {/* Card 1: Completed Meetings */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-2xs flex items-center space-x-3.5">
-          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 border border-blue-100 dark:border-blue-900/40">
-            <Layers className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-2xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight">
-              {metrics.completedCount}
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Indexed Meetings</p>
-          </div>
-        </div>
-
-        {/* Card 2: Total Decisions */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-2xs flex items-center space-x-3.5">
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-100 dark:border-emerald-900/40">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
-              {metrics.totalDecisions}
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Extracted Decisions</p>
-          </div>
-        </div>
-
-        {/* Card 3: Action Items */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-2xs flex items-center space-x-3.5">
-          <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 border border-amber-100 dark:border-amber-900/40">
-            <CheckSquare className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-2xl font-extrabold text-amber-600 dark:text-amber-400 font-mono tracking-tight">
-              {metrics.totalActionItems}
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Assigned Tasks</p>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Decision Timeline Section */}
-      {timelineEntries.length > 0 && (
+      {/* ── Active In-Progress Processing Cards (Live & Uploaded) ── */}
+      {processing.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-extrabold text-slate-900 dark:text-white font-sans tracking-tight flex items-center gap-2">
-              <History className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              <span>Decision Timeline</span>
-            </h2>
-            <span className="text-xs text-slate-400 font-medium">Most recent first</span>
+            <span className="text-xs font-extrabold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-600 animate-ping" />
+              Live AI Processing in Progress ({processing.length})
+            </span>
+            <span className="text-[11px] text-slate-400 font-semibold">Tap card for detailed 8-step pipeline</span>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs max-h-[420px] overflow-y-auto">
-            <ol className="relative border-l-2 border-slate-100 dark:border-slate-800 space-y-5 ml-2">
-              {timelineEntries.map(({ decision, meeting: mtg }: { decision: Decision; meeting: Meeting }) => (
-                <li key={decision.id} className="ml-5">
-                  <span className="absolute -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-blue-500 border-2 border-white dark:border-slate-900 mt-1.5" />
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="text-[11px] font-bold text-slate-400 font-mono">{mtg.dateTime}</span>
-                    <button
-                      onClick={() => { onSelectMeetingId(mtg.id); onSelectMeeting(mtg); }}
-                      className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
-                    >
-                      {mtg.title}
-                    </button>
-                    {decision.impactLevel && (
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                        decision.impactLevel === 'High'
-                          ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
-                          : decision.impactLevel === 'Medium'
-                          ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                      }`}>
-                        {decision.impactLevel} impact
-                      </span>
-                    )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {processing.map((m) => {
+              const pct = Math.min(99, Math.max(10, m.progressPercentage || (m.status === 'ASR' ? 45 : m.status === 'LLM' ? 75 : m.status === 'Graph' ? 90 : 25)));
+              return (
+                <div
+                  key={m.id}
+                  onClick={() => setActiveProcessingMeeting(m)}
+                  className="bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800/80 rounded-3xl p-5 shadow-md shadow-blue-500/5 hover:border-blue-400 transition-all cursor-pointer space-y-3 group"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center space-x-3 min-w-0">
+                      <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-950/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                          {m.title}
+                        </p>
+                        <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 truncate">
+                          {m.currentStepMessage || (m.status === 'Preprocessing' ? 'Extracting audio & diarization...' : m.status === 'ASR' ? 'Transcribing with Deepgram...' : m.status === 'LLM' ? 'Gemini AI intelligence extraction...' : m.status === 'Graph' ? 'Indexing memory graph...' : 'Processing...')}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="text-lg font-black text-blue-600 dark:text-blue-400 font-mono">
+                      {pct}%
+                    </span>
                   </div>
 
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">{decision.title}</h3>
-
-                  {decision.rationale && (
-                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
-                      <span className="font-semibold text-slate-400">Reason: </span>{decision.rationale}
-                    </p>
-                  )}
-
-                  {mtg.participants && mtg.participants.length > 0 && (
-                    <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-slate-400">
-                      <Users className="w-3 h-3" />
-                      <span>{(mtg.participants as any[]).map(p => typeof p === 'string' ? p : p.name).join(', ')}</span>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ol>
+                  <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      style={{ width: `${pct}%` }}
+                      className="h-full bg-gradient-to-r from-blue-600 via-teal-400 to-emerald-400 transition-all duration-500"
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* Completed Meetings Intelligence Cards Section */}
-      <div className="space-y-4 pt-2">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <h2 className="text-base font-extrabold text-slate-900 dark:text-white font-sans tracking-tight flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            <span>Completed Meetings Intelligence Cards</span>
-          </h2>
+      {/* ── Search & Filter Tabs ── */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+        <input
+          type="text"
+          placeholder="Search meeting title or attendee…"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+          className="w-full sm:w-80 px-4 py-2.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors shadow-2xs font-semibold"
+        />
 
-          <div className="flex items-center gap-2 shrink-0">
-            <Filter className="w-4 h-4 text-slate-400" />
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-3.5 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer shadow-2xs"
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700">
+          {(['ALL', 'scheduled', 'live', 'upload'] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => handleFilter(f)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer capitalize ${
+                typeFilter === f
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              }`}
             >
-              <option value="ALL">All Categories</option>
-              <option value="Core Infrastructure">Core Infrastructure</option>
-              <option value="Security & Compliance">Security & Compliance</option>
-              <option value="Core Engine v2">Core Engine v2</option>
-            </select>
-          </div>
+              {f === 'ALL' ? 'All' : f}
+            </button>
+          ))}
         </div>
+      </div>
 
-        {/* 3-Column Card Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
-          {filteredCompletedMeetings.map((mtg) => {
-            const conf = getConfidenceScore(mtg);
+      {/* ── Meeting Cards Grid (Left-Right 2-Column, Maximum 6 per page) ── */}
+      {pageItems.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 p-16 text-center bg-white dark:bg-slate-900 space-y-2">
+          <p className="text-sm font-bold text-slate-700 dark:text-slate-300">No completed meetings found</p>
+          <p className="text-xs text-slate-400">Click "Upload Yourself" or join a Live Meeting to record intelligence.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {pageItems.map((m) => {
+            const mt = meetingType(m);
+            const displayTitle = m.title || (m.roomCode ? `Room: ${m.roomCode}` : 'Live Meeting');
+            const attendees = (m.participants || [])
+              .map((p) => (typeof p === 'string' ? p : (p as any).name))
+              .filter(Boolean);
+
             return (
-              <div
-                key={mtg.id}
-                onClick={() => {
-                  onSelectMeetingId(mtg.id);
-                  onSelectMeeting(mtg);
-                }}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs hover:border-blue-500 dark:hover:border-blue-500 hover:shadow-sm transition-all cursor-pointer flex flex-col justify-between space-y-3.5 group relative"
+              <button
+                key={m.id}
+                onClick={() => onSelectMeeting(m)}
+                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 text-left shadow-sm hover:shadow-md hover:border-blue-400 dark:hover:border-blue-600 transition-all group flex flex-col justify-between gap-4 cursor-pointer"
               >
-                <div className="space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="px-2.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-[11px] font-bold border border-blue-100 dark:border-blue-900">
-                      {mtg.project}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold border border-emerald-200 dark:border-emerald-800 flex items-center space-x-1">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                      <span>Indexed</span>
-                    </span>
+                <div className="space-y-3 w-full">
+                  {/* Type + Status + Delete */}
+                  <div className="flex items-center justify-between">
+                    <TypeBadge type={mt} />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Permanently delete "${displayTitle}" and remove all its storage data?`)) {
+                            deleteMeeting(m.id);
+                          }
+                        }}
+                        className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/80 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 border border-slate-200/80 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-800 transition-all cursor-pointer shadow-2xs"
+                        title="Delete meeting"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1 leading-snug">
-                    {mtg.title}
+                  {/* Title */}
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
+                    {displayTitle}
                   </h3>
 
-                  <div className="flex items-center gap-3 text-xs text-slate-400 font-medium">
+                  {/* Meta details */}
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
                     <span className="flex items-center gap-1">
                       <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                      {mtg.dateTime}
+                      {m.dateTime}
                     </span>
-                    {mtg.duration && (
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-slate-400" />
-                        {mtg.duration}
-                      </span>
-                    )}
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      {m.duration || '—'}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Users className="w-3.5 h-3.5 text-slate-400" />
+                      {attendees.length} attendee{attendees.length !== 1 ? 's' : ''}
+                    </span>
                   </div>
-
-                  <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800/80">
-                    {mtg.summary || 'AI-extracted decision intelligence summary available.'}
-                  </p>
                 </div>
 
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-blue-600 dark:text-blue-400 font-semibold">
-                  <span>{mtg.decisions?.length || 0} Decisions • {mtg.actionItems?.length || 0} Tasks ({conf}% Conf)</span>
-                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                {/* Intelligence Pills Footer */}
+                <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800/80 w-full">
+                  {(m.decisions?.length || 0) > 0 && (
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-900 rounded-full text-[10px] font-bold">
+                      <Sparkles className="w-2.5 h-2.5" />
+                      {m.decisions.length} decision{m.decisions.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {(m.actionItems?.length || 0) > 0 && (
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-100 dark:border-violet-900 rounded-full text-[10px] font-bold">
+                      {m.actionItems.length} action{m.actionItems.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {(m.transcript?.length || 0) > 0 && (
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-full text-[10px] font-bold">
+                      <FileText className="w-2.5 h-2.5" />
+                      Transcript ({m.transcript.length})
+                    </span>
+                  )}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
-      </div>
+      )}
+
+      {/* ── Pagination (Max 6 per page) ── */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-4">
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-blue-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+
+          {Array.from({ length: totalPages }).map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setPage(i)}
+              className={`w-9 h-9 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+                i === page
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-blue-400'
+              }`}
+            >
+              {i + 1}
+            </button>
+          ))}
+
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={page >= totalPages - 1}
+            className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-blue-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* ── Upload Modal ── */}
+      {isUploadModalOpen && (
+        <UploadModal
+          isOpen={isUploadModalOpen}
+          onClose={() => setIsUploadModalOpen(false)}
+          onUpload={handleDirectUpload}
+          availableProjects={['Core Engine v2', 'Enterprise Core Platform', 'Coco AI Intelligence', 'Design Systems']}
+        />
+      )}
+
+      {/* ── Closable 8-Step Coco Processing Modal ── */}
+      {activeProcessingMeeting && (
+        <CocoProcessingModal
+          isOpen={Boolean(activeProcessingMeeting)}
+          meeting={meetings.find(m => m.id === activeProcessingMeeting.id) || activeProcessingMeeting}
+          onClose={() => setActiveProcessingMeeting(null)}
+          onViewMeeting={onSelectMeeting}
+        />
+      )}
+
     </div>
   );
 };

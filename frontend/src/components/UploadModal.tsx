@@ -1,483 +1,278 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  X, 
-  UploadCloud, 
-  FileAudio, 
-  Sparkles, 
-  Search, 
-  User, 
-  Plus, 
-  ChevronDown, 
-  Calendar,
-  Clock
+import React, { useState, useRef } from 'react';
+import ReactDOM from 'react-dom';
+import {
+  X,
+  UploadCloud,
+  FileAudio,
+  FileVideo,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
-import { Meeting, Employee } from '../types';
-import { INITIAL_EMPLOYEES_DATA } from '../mock/mockData';
-import { useNotifications } from '../context/NotificationContext';
+import { Meeting } from '../types';
+import * as api from '../services/api';
+import { useApp } from '../context/AppContext';
 
 interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onUpload: (newMeeting: Meeting) => void;
-  availableProjects: string[];
+  availableProjects?: string[];
 }
 
 export const UploadModal: React.FC<UploadModalProps> = ({
   isOpen,
   onClose,
   onUpload,
-  availableProjects
+  availableProjects = ['Core Engine v2', 'Enterprise Core Platform', 'Coco AI Intelligence', 'Design Systems']
 }) => {
-  const { createInvitationNotifications, triggerAiPipelineComplete } = useNotifications();
-
-  const [title, setTitle] = useState('');
-  const [project, setProject] = useState(availableProjects[0] || 'Core Engine v2');
-  const [customProject, setCustomProject] = useState('');
-
-  // Date and Time state
-  const todayStr = new Date().toISOString().split('T')[0];
-  const [meetingDate, setMeetingDate] = useState(todayStr);
-  const [meetingTime, setMeetingTime] = useState('10:00');
-  
-  // Multi-Select Combobox State for Employees
-  const [selectedEmployees, setSelectedEmployees] = useState<Employee[]>([
-    INITIAL_EMPLOYEES_DATA[7], // Alex Rivers
-    INITIAL_EMPLOYEES_DATA[2]  // Elena Rostova
-  ]);
-  const [employeeSearchQuery, setEmployeeSearchQuery] = useState('');
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const { currentUser, processAudioForMeeting } = useApp();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [title, setTitle] = useState('');
+  const [project, setProject] = useState(availableProjects[0] || 'Core Engine v2');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Close combobox dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const [submitMessage, setSubmitMessage] = useState('Starting AI Pipeline...');
+  const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   if (!isOpen) return null;
 
-  // Filter available employees not yet selected
-  const availableEmployees = INITIAL_EMPLOYEES_DATA.filter(
-    emp => !selectedEmployees.some(s => s.id === emp.id)
-  );
+  const handleFileSelect = (file: File) => {
+    const validExtensions = ['.mp4', '.wav', '.mp3', '.m4a', '.webm'];
+    const fileName = file.name.toLowerCase();
+    const isValid = validExtensions.some(ext => fileName.endsWith(ext));
 
-  const filteredEmployees = availableEmployees.filter(emp =>
-    emp.name.toLowerCase().includes(employeeSearchQuery.toLowerCase()) ||
-    emp.department.toLowerCase().includes(employeeSearchQuery.toLowerCase()) ||
-    emp.email.toLowerCase().includes(employeeSearchQuery.toLowerCase()) ||
-    (emp.role && emp.role.toLowerCase().includes(employeeSearchQuery.toLowerCase()))
-  );
+    if (!isValid) {
+      setError('Please upload a valid audio or video file (.mp4, .wav, .mp3, .m4a)');
+      return;
+    }
 
-  const handleAddEmployee = (emp: Employee) => {
-    setSelectedEmployees(prev => [...prev, emp]);
-    setEmployeeSearchQuery('');
+    setError(null);
+    setSelectedFile(file);
+
+    // Auto fill title if empty
+    if (!title.trim()) {
+      const cleanTitle = file.name
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[_-]/g, ' ')
+        .replace(/\b\w/g, l => l.toUpperCase());
+      setTitle(cleanTitle);
+    }
   };
 
-  const handleRemoveEmployee = (empId: string) => {
-    setSelectedEmployees(prev => prev.filter(e => e.id !== empId));
-  };
-
-  const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setSelectedFile(e.dataTransfer.files[0]);
+      handleFileSelect(e.dataTransfer.files[0]);
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
-    }
-  };
-
-  const formatScheduledDateTime = (dateStr: string, timeStr: string) => {
-    if (!dateStr) return 'Aug 10, 2026 • 10:00 AM';
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const dateObj = new Date(year, month - 1, day);
-    const monthName = dateObj.toLocaleString('en-US', { month: 'short' });
-    
-    let timeFormatted = timeStr;
-    if (timeStr) {
-      const [h, m] = timeStr.split(':').map(Number);
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      const formattedH = h % 12 || 12;
-      const formattedM = m < 10 ? `0${m}` : `${m}`;
-      timeFormatted = `${formattedH}:${formattedM} ${ampm}`;
-    }
-    
-    return `${monthName} ${day}, ${year} • ${timeFormatted}`;
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!selectedFile || !title.trim()) return;
+    if (isSubmitting) return;
 
     setIsSubmitting(true);
+    setError(null);
+    setSubmitMessage('Uploading to backend AI engine...');
 
-    const finalProject = project === 'NEW' ? (customProject.trim() || 'General') : project;
-    const participantNames = selectedEmployees.map(e => e.name);
-    const formattedDateTime = formatScheduledDateTime(meetingDate, meetingTime);
+    try {
+      // STEP 1: Upload to backend — get the real server-assigned UUID
+      const { meeting_id: backendId } = await api.uploadMeeting(
+        selectedFile,
+        title.trim(),
+        project
+      );
 
-    setTimeout(() => {
-      const hasAudio = !!selectedFile;
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      // STEP 2: Build the placeholder meeting using the REAL backend UUID
       const createdMeeting: Meeting = {
-        id: `mtg-${Date.now().toString().slice(-4)}`,
+        id: backendId,
         title: title.trim(),
-        project: finalProject,
-        dateTime: formattedDateTime,
-        participants: participantNames.length > 0 ? participantNames : ['Alex Rivers', 'Elena Rostova'],
-        status: hasAudio ? 'Pending' : 'Scheduled',
-        audioFileName: hasAudio ? selectedFile!.name : undefined,
-        fileSize: hasAudio ? `${(selectedFile!.size / (1024 * 1024)).toFixed(1)} MB` : undefined,
-        duration: '45m',
+        project,
+        dateTime: `${dateStr} ${timeStr}`,
+        participants: [currentUser.name],
+        status: 'Preprocessing',
+        audioFileName: selectedFile.name,
+        fileSize: `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB`,
+        duration: 'Processing...',
+        progressPercentage: 15,
+        currentStepMessage: 'Extracting audio (ffmpeg: video → 16kHz WAV)...',
         decisions: [],
         actionItems: [],
         transcript: []
       };
 
+      // STEP 3: Register meeting in UI with real ID
       onUpload(createdMeeting);
-      
-      // Trigger invitation notifications for participants
-      createInvitationNotifications(
-        createdMeeting.id,
-        createdMeeting.title,
-        meetingDate,
-        meetingTime,
-        createdMeeting.participants
-      );
 
-      // If audio file was attached, send FormData payload to backend handoff endpoint
-      if (hasAudio) {
-        const formData = new FormData();
-        formData.append('meetingId', createdMeeting.id);
-        formData.append('title', createdMeeting.title);
-        formData.append('audio_file', selectedFile!);
-        formData.append('participants', JSON.stringify(createdMeeting.participants));
+      // STEP 4: Start polling using the real backend UUID (no upload inside)
+      processAudioForMeeting(backendId, selectedFile, createdMeeting);
 
-        // Send payload to backend endpoint
-        fetch('/api/meetings/upload', {
-          method: 'POST',
-          body: formData
-        }).catch((err) => {
-          console.log('[Backend Handoff] FormData sent to POST /api/meetings/upload:', {
-            meetingId: createdMeeting.id,
-            audioFileName: selectedFile!.name,
-            participants: createdMeeting.participants
-          });
-        });
-      }
-
-      setIsSubmitting(false);
-      setTitle('');
-      setSelectedFile(null);
+      // STEP 5: Close modal
       onClose();
-    }, 500);
+    } catch (err: any) {
+      const msg = err?.message || 'Upload failed. Please check the backend is running.';
+      setError(msg);
+      setSubmitMessage('Upload failed');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-fade-in font-sans">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl relative overflow-hidden space-y-5">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md shrink-0">
-              <Calendar className="w-5 h-5" />
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-fade-in font-sans">
+      <div className="w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+
+        {/* Modal Header */}
+        <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-blue-600 flex items-center justify-center text-white shrink-0 shadow-md shadow-blue-600/30">
+              <UploadCloud className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Create / Schedule Meeting</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Schedule a meeting now or attach recording for AI analysis</p>
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
+                Upload & Process Meeting
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                Deepgram transcription, speaker diarization, vision, and Gemini AI analysis
+              </p>
             </div>
           </div>
+
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Title */}
+        {/* Modal Form */}
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1 bg-white dark:bg-slate-900">
+
+          {error && (
+            <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 flex items-center gap-2.5 text-xs font-bold text-rose-700 dark:text-rose-300">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* Drag & Drop File Zone */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-3xl p-8 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-3 ${
+              isDragging
+                ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 scale-[1.01]'
+                : selectedFile
+                ? 'border-emerald-400 bg-emerald-50/30 dark:bg-emerald-950/20'
+                : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 hover:border-blue-400 dark:hover:border-blue-600'
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".mp4,.wav,.mp3,.m4a,.webm,video/*,audio/*"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleFileSelect(e.target.files[0]);
+                }
+              }}
+              className="hidden"
+            />
+
+            {selectedFile ? (
+              <div className="space-y-1 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-2">
+                  {selectedFile.name.endsWith('.mp4') || selectedFile.name.endsWith('.webm') ? (
+                    <FileVideo className="w-6 h-6" />
+                  ) : (
+                    <FileAudio className="w-6 h-6" />
+                  )}
+                </div>
+                <p className="text-sm font-bold text-slate-900 dark:text-white truncate max-w-sm">
+                  {selectedFile.name}
+                </p>
+                <p className="text-xs text-slate-400 font-semibold">
+                  {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB · Ready for AI processing
+                </p>
+                <span className="text-[11px] text-blue-600 dark:text-blue-400 font-bold hover:underline inline-block mt-1">
+                  Click to choose a different file
+                </span>
+              </div>
+            ) : (
+              <div className="space-y-1.5 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-2">
+                  <UploadCloud className="w-6 h-6" />
+                </div>
+                <p className="text-sm font-bold text-slate-900 dark:text-white">
+                  Drop your meeting recording here, or <span className="text-blue-600 dark:text-blue-400 underline">browse</span>
+                </p>
+                <p className="text-xs text-slate-400 font-medium">
+                  Supports MP4 video, WAV, MP3, and M4A audio files
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Meeting Title Input */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
               Meeting Title *
             </label>
             <input
               type="text"
-              required
-              placeholder="e.g., Sprint Planning & Technical Debt Review"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm focus:outline-hidden focus:border-blue-600 placeholder-slate-400 transition-all"
+              placeholder="e.g. Q3 Cloud Architecture & Security Governance Sync"
+              required
+              className="w-full px-4 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors"
             />
           </div>
 
-          {/* Project Selection */}
+          {/* Project Tag */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-              Project Category
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+              Associated Project
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-600 cursor-pointer"
-              >
-                {availableProjects.map((proj) => (
-                  <option key={proj} value={proj}>{proj}</option>
-                ))}
-                <option value="NEW">+ Create New Project...</option>
-              </select>
-              {project === 'NEW' && (
-                <input
-                  type="text"
-                  placeholder="New Project Name"
-                  value={customProject}
-                  onChange={(e) => setCustomProject(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:border-blue-600"
-                />
-              )}
-            </div>
-          </div>
-
-          {/* Meeting Date & Time (2-column row) */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                Meeting Date *
-              </label>
-              <input
-                type="date"
-                required
-                value={meetingDate}
-                onChange={(e) => setMeetingDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-600 transition-all"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                Meeting Time *
-              </label>
-              <input
-                type="time"
-                required
-                value={meetingTime}
-                onChange={(e) => setMeetingTime(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:border-blue-600 transition-all"
-              />
-            </div>
-          </div>
-
-          {/* Multi-Select Combobox for Participants */}
-          <div className="space-y-1.5" ref={dropdownRef}>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-              Meeting Participants (Invited Team Members)
-            </label>
-            
-            <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 space-y-2 focus-within:border-blue-600 transition-all">
-              {/* Selected Employee Chips */}
-              <div className="flex flex-wrap gap-1.5">
-                {selectedEmployees.map((emp) => (
-                  <span
-                    key={emp.id}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-xs font-semibold shadow-2xs"
-                  >
-                    <User className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
-                    <span>{emp.name}</span>
-                    <span className="text-[10px] bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-1.5 py-0.2 rounded-md font-medium">
-                      {emp.department}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveEmployee(emp.id)}
-                      className="p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 text-blue-500 hover:text-blue-900 transition-colors cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-
-              {/* Combobox Search Input */}
-              <div className="relative flex items-center">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder={
-                    selectedEmployees.length === 0 
-                      ? "Search & select team members (e.g., Alex Rivers)..." 
-                      : "Type name or department to add more..."
-                  }
-                  value={employeeSearchQuery}
-                  onChange={(e) => {
-                    setEmployeeSearchQuery(e.target.value);
-                    setIsDropdownOpen(true);
-                  }}
-                  onFocus={() => setIsDropdownOpen(true)}
-                  className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:border-blue-600 placeholder-slate-400"
-                />
-                <ChevronDown 
-                  className={`w-3.5 h-3.5 absolute right-2.5 text-slate-400 transition-transform cursor-pointer ${
-                    isDropdownOpen ? 'rotate-180 text-blue-600' : ''
-                  }`}
-                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                />
-              </div>
-            </div>
-
-            {/* Employee Dropdown Popup List */}
-            {isDropdownOpen && (
-              <div className="relative z-30">
-                <div className="absolute top-1 left-0 right-0 max-h-56 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl divide-y divide-slate-100 dark:divide-slate-800 animate-fade-in">
-                  {filteredEmployees.length > 0 ? (
-                    filteredEmployees.map((emp) => (
-                      <div
-                        key={emp.id}
-                        onClick={() => handleAddEmployee(emp)}
-                        className="p-2.5 hover:bg-blue-50/80 dark:hover:bg-slate-800 cursor-pointer transition-colors flex items-center justify-between group"
-                      >
-                        <div className="flex items-center gap-2.5 truncate">
-                          <div className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold text-xs flex items-center justify-center shrink-0">
-                            {emp.name.charAt(0)}
-                          </div>
-                          <div className="truncate">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                                {emp.name}
-                              </span>
-                              <span className="px-1.5 py-0.2 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-medium border border-slate-200 dark:border-slate-700">
-                                {emp.department}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          className="px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 font-semibold text-[11px] flex items-center gap-1 transition-colors shrink-0"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Add</span>
-                        </button>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="p-4 text-center text-xs text-slate-500 dark:text-slate-400">
-                      No matching employees found in database.
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Audio Upload Zone (OPTIONAL) */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                Audio Recording (MP3, WAV, M4A)
-              </label>
-              <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-bold border border-slate-200 dark:border-slate-700">
-                Optional - Can upload post-meeting
-              </span>
-            </div>
-
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleFileDrop}
-              className={`border-2 border-dashed rounded-2xl p-5 text-center transition-all ${
-                selectedFile
-                  ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/30'
-                  : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 hover:border-blue-500 dark:hover:border-blue-500'
-              }`}
+            <select
+              value={project}
+              onChange={(e) => setProject(e.target.value)}
+              className="w-full px-4 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-colors cursor-pointer"
             >
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={handleFileChange}
-                className="hidden"
-                id="audio-file-input"
-              />
-              <label htmlFor="audio-file-input" className="cursor-pointer flex flex-col items-center gap-2">
-                {selectedFile ? (
-                  <>
-                    <FileAudio className="w-8 h-8 text-emerald-600 dark:text-emerald-400 animate-pulse" />
-                    <div>
-                      <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">{selectedFile.name}</p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB • Click to change file
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <UploadCloud className="w-8 h-8 text-blue-600 dark:text-blue-400 mb-1" />
-                    <p className="text-xs text-slate-700 dark:text-slate-300 font-semibold">
-                      Drag & drop recording file, or <span className="text-blue-600 dark:text-blue-400 underline">browse</span>
-                    </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Attach audio now to immediately trigger AI transcription & decision extraction</p>
-                  </>
-                )}
-              </label>
-            </div>
+              {availableProjects.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Dynamic Actions */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+          {/* Submit Action */}
+          <div className="pt-2">
             <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+              type="submit"
+              disabled={isSubmitting || !selectedFile || !title.trim()}
+              className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-extrabold rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-600/25 cursor-pointer"
             >
-              Cancel
+              <Sparkles className="w-4 h-4" />
+              <span>{isSubmitting ? submitMessage : 'Start AI Pipeline & Extract Intelligence'}</span>
             </button>
-
-            {selectedFile ? (
-              <button
-                type="submit"
-                disabled={isSubmitting || !title.trim()}
-                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50 shadow-md flex items-center gap-2 transition-all cursor-pointer"
-              >
-                {isSubmitting ? (
-                  <>Processing AI Pipeline...</>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4 text-blue-200" />
-                    <span>Create & Start AI Pipeline</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={isSubmitting || !title.trim()}
-                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50 shadow-md flex items-center gap-2 transition-all cursor-pointer"
-              >
-                {isSubmitting ? (
-                  <>Scheduling...</>
-                ) : (
-                  <>
-                    <Calendar className="w-4 h-4" />
-                    <span>Schedule / Create Meeting</span>
-                  </>
-                )}
-              </button>
-            )}
           </div>
+
         </form>
+
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

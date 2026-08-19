@@ -172,3 +172,30 @@ def _stable_id(meeting_id: str, kind: str, text: str) -> str:
     """Deterministic id so re-processing the same meeting MERGEs instead of
     duplicating nodes."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"corporate-brain://{meeting_id}/{kind}/{text}"))
+
+def delete_meeting_nodes(meeting_id: str) -> None:
+    """Delete all nodes (Meeting, Decision, ActionItem) associated with a meeting ID
+    from Neo4j, and clean up any orphaned Person or Project nodes."""
+    try:
+        # Delete Decisions attached to this meeting
+        run_query(
+            "MATCH (m:Meeting {id: $meeting_id})<-[:MADE_IN]-(d:Decision) DETACH DELETE d",
+            meeting_id=meeting_id,
+        )
+        # Delete ActionItems attached to this meeting
+        run_query(
+            "MATCH (m:Meeting {id: $meeting_id})<-[:MADE_IN]-(a:ActionItem) DETACH DELETE a",
+            meeting_id=meeting_id,
+        )
+        # Delete the Meeting node itself
+        run_query(
+            "MATCH (m:Meeting {id: $meeting_id}) DETACH DELETE m",
+            meeting_id=meeting_id,
+        )
+        # Clean up orphan Person nodes that have no relationships left
+        run_query("MATCH (p:Person) WHERE NOT (p)--() DELETE p")
+        # Clean up orphan Project nodes that have no relationships left
+        run_query("MATCH (pr:Project) WHERE NOT (pr)--() DELETE pr")
+        logger.info(f"Deleted Neo4j graph nodes for meeting {meeting_id}")
+    except Exception as exc:
+        logger.warning(f"Neo4j node deletion for meeting {meeting_id} failed: {exc}")

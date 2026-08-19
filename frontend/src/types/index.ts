@@ -51,6 +51,8 @@ export interface Decision {
   confidenceScore: number;
   category?: string;
   impactLevel?: 'High' | 'Medium' | 'Low';
+  speaker?: string;
+  timestamp?: string;
 }
 
 export interface ActionItem {
@@ -132,6 +134,13 @@ export interface Meeting {
   fileSize?: string;
   completedAt?: string;
   graphData?: GraphData;
+  speaker_map?: Record<string, string>;
+  roomCode?: string;
+  hostName?: string;
+  hostEmail?: string;
+  whiteboardPdfName?: string;
+  progressPercentage?: number;
+  currentStepMessage?: string;
 }
 
 export type NotificationCategory = 'meeting' | 'action_item' | 'system' | 'message' | 'contradiction' | 'ai_pipeline';

@@ -1,4 +1,5 @@
 import { Excalidraw, exportToCanvas } from '@excalidraw/excalidraw';
+import { jsPDF } from 'jspdf';
 import '@excalidraw/excalidraw/index.css';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
@@ -29,6 +30,9 @@ export async function downloadWhiteboardPdf(pagesMap: Record<number, readonly Ex
   const pageNumbers = Object.keys(pagesMap).map(Number).sort((a, b) => a - b);
   const safeRoom = roomName.replace(/[^a-zA-Z0-9_-]/g, '-');
   
+  let pdf: jsPDF | null = null;
+  let hasContent = false;
+
   for (const pageNum of pageNumbers) {
     const elements = pagesMap[pageNum];
     if (!elements || elements.length === 0) continue;
@@ -41,16 +45,35 @@ export async function downloadWhiteboardPdf(pagesMap: Record<number, readonly Ex
         },
         files: null,
       });
-      const dataUrl = canvas.toDataURL('image/png');
-      const link = document.createElement('a');
-      link.href = dataUrl;
-      link.download = `Whiteboard_${safeRoom}_Page_${pageNum}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+
+      const imgData = canvas.toDataURL('image/png');
+      const width = canvas.width;
+      const height = canvas.height;
+
+      if (!pdf) {
+        pdf = new jsPDF({
+          orientation: width > height ? 'landscape' : 'portrait',
+          unit: 'px',
+          format: [width, height],
+        });
+        pdf.addImage(imgData, 'PNG', 0, 0, width, height);
+      } else {
+        pdf.addPage([width, height], width > height ? 'landscape' : 'portrait');
+        pdf.addImage(imgData, 'PNG', 0, 0, width, height);
+      }
+      hasContent = true;
     } catch (err) {
       console.error('Failed exporting whiteboard page:', err);
     }
+  }
+
+  if (pdf && hasContent) {
+    const filename = `Whiteboard_${safeRoom}.pdf`;
+    pdf.save(filename);
+    return filename;
+  } else {
+    // Whiteboard is empty - do not download any empty file!
+    return null;
   }
 }
 

@@ -35,7 +35,7 @@ export const MemoryGraphView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [meetings.length]);
 
   return (
     <div className="max-w-[1920px] w-full mx-auto px-8 py-6 animate-fade-in font-sans">

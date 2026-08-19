@@ -1,3 +1,4 @@
+import sqlite3
 """
 server.py — Standalone Ask Coco Intelligence Server (ChromaDB + Groq)
 """
@@ -71,101 +72,160 @@ def init_memory():
     load_all_meetings()
 
 def load_all_meetings():
-    if not RESULTS_DIR.exists():
-        logger.warning(f"Results dir {RESULTS_DIR} does not exist.")
+    global collection
+    if collection is None:
         return
 
-    global collection
-    
-    # Get existing source IDs from ChromaDB to avoid duplicates
-    existing_sources = set()
-    if collection.count() > 0:
-        results = collection.get(include=["metadatas"])
-        if results and results["metadatas"]:
-            for meta in results["metadatas"]:
-                if meta and "source" in meta:
-                    existing_sources.add(meta["source"])
+    # 1. Map SQLite meeting IDs to titles
+    sqlite_titles = {}
+    for db_path in [
+        _root_dir / "backend" / "corporate_brain.db",
+        _root_dir / "backend" / "app.db",
+        _root_dir / "corporate_brain.db"
+    ]:
+        if db_path.exists():
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, title FROM meetings")
+                for row in cursor.fetchall():
+                    sqlite_titles[row[0]] = row[1]
+                conn.close()
+                break
+            except Exception as e:
+                logger.warning(f"Notice reading SQLite database for titles: {e}")
 
-    logger.info("Syncing new meeting data into ChromaDB...")
+    # 2. Get existing loaded IDs in ChromaDB
+    existing_ids = set()
+    try:
+        if collection.count() > 0:
+            existing_results = collection.get(include=[])
+            if existing_results and existing_results.get("ids"):
+                existing_ids = set(existing_results["ids"])
+    except Exception:
+        existing_ids = set()
+
     total_added = 0
 
-    for p in RESULTS_DIR.glob("*.json"):
-        if p.name.endswith(".status.json"):
-            continue
-        try:
-            with open(p, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            job_id = data.get("job_id", p.stem)
-            filename = data.get("filename", "Unknown Meeting")
-            
-            if filename in existing_sources:
-                continue # Already loaded
-
-            
-            transcript_raw = data.get("transcript", [])
-            snippets = []
-            
-            for item in transcript_raw:
-                timestamp = item.get("timestamp", "00:00:00")
-                speaker = item.get("speaker", "Unknown")
-                text = item.get("text", "")
-                full_line = f"[{timestamp}] {speaker}: {text}"
-                snippets.append({
-                    "timestamp": timestamp,
-                    "speaker": speaker,
-                    "text": text,
-                    "full_line": full_line
-                })
-
-            if snippets:
-                ids = []
-                documents = []
-                metadatas = []
-                for idx, snippet in enumerate(snippets):
-                    ids.append(f"{job_id}_transcript_{idx:04d}")
-                    documents.append(snippet["full_line"])
-                    metadatas.append({
-                        "timestamp": snippet["timestamp"],
-                        "speaker": snippet["speaker"],
-                        "source": filename,
-                        "full_text": snippet["text"]
-                    })
+    # 3. Source A: Load from MEETINGS/results/
+    if RESULTS_DIR.exists():
+        for p in RESULTS_DIR.glob("*.json"):
+            if p.name.endswith(".status.json"):
+                continue
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                job_id = data.get("job_id", p.stem)
+                filename = data.get("filename", "Unknown Meeting")
                 
-                collection.add(ids=ids, documents=documents, metadatas=metadatas)
-                total_added += len(ids)
+                transcript_raw = data.get("transcript", [])
+                ids, documents, metadatas = [], [], []
+                for idx, item in enumerate(transcript_raw):
+                    doc_id = f"{job_id}_transcript_{idx:04d}"
+                    if doc_id in existing_ids:
+                        continue
+                    ts = item.get("timestamp", "00:00:00")
+                    spk = item.get("speaker", "Unknown")
+                    txt = item.get("text", "")
+                    ids.append(doc_id)
+                    documents.append(f"[{ts}] {spk}: {txt}")
+                    metadatas.append({"timestamp": ts, "speaker": spk, "source": filename, "full_text": txt})
 
-            # Store Decisions and Action items
-            decisions = data.get("decisions", [])
-            action_items = data.get("action_items", [])
-            if decisions or action_items:
-                summary_lines = [f"📋 SUMMARY FOR: {filename}"]
-                if decisions:
-                    summary_lines.append("\n📝 Decisions:")
-                    for i, d in enumerate(decisions, 1):
-                        summary_lines.append(f"   {i}. {d.get('text', '')}")
-                if action_items:
-                    summary_lines.append("\n✅ Action Items:")
-                    for i, a in enumerate(action_items, 1):
-                        summary_lines.append(f"   {i}. {a.get('task', '')} (Assignee: {a.get('assignee', 'Unassigned')})")
-                
-                summary_text = "\n".join(summary_lines)
-                collection.add(
-                    ids=[f"{job_id}_summary"],
-                    documents=[summary_text],
-                    metadatas=[{
-                        "timestamp": "00:00:00",
-                        "speaker": "System",
-                        "source": filename,
-                        "full_text": summary_text
-                    }]
-                )
-                total_added += 1
+                sum_id = f"{job_id}_summary"
+                if sum_id not in existing_ids:
+                    decisions = data.get("decisions", [])
+                    action_items = data.get("action_items", [])
+                    if decisions or action_items:
+                        s_lines = [f"📋 SUMMARY FOR: {filename}"]
+                        if decisions:
+                            s_lines.append("\n📝 Decisions:")
+                            for i, d in enumerate(decisions, 1):
+                                s_lines.append(f"   {i}. {d.get('text', '')}")
+                        if action_items:
+                            s_lines.append("\n✅ Action Items:")
+                            for i, a in enumerate(action_items, 1):
+                                s_lines.append(f"   {i}. {a.get('task', '')} (Assignee: {a.get('assignee', 'Unassigned')})")
+                        summary_txt = "\n".join(s_lines)
+                        ids.append(sum_id)
+                        documents.append(summary_txt)
+                        metadatas.append({"timestamp": "00:00:00", "speaker": "System", "source": filename, "full_text": summary_txt})
 
-        except Exception as e:
-            logger.warning(f"Error loading {p}: {e}")
+                if ids:
+                    collection.add(ids=ids, documents=documents, metadatas=metadatas)
+                    total_added += len(ids)
+            except Exception as e:
+                logger.warning(f"Error loading {p}: {e}")
 
-    logger.info(f"✅ Finished loading. {total_added} total snippets stored.")
+    # 4. Source B: Load from Corporate Brain backend storage (transcripts + summaries)
+    backend_sum_dir = _root_dir / "backend" / "storage" / "summaries"
+    backend_trans_dir = _root_dir / "backend" / "storage" / "transcripts"
+
+    if backend_sum_dir.exists():
+        for sum_path in backend_sum_dir.glob("*.json"):
+            if sum_path.name.startswith("."):
+                continue
+            m_id = sum_path.stem
+            meeting_title = sqlite_titles.get(m_id, f"Meeting {m_id[:8]}")
+            
+            ids, documents, metadatas = [], [], []
+
+            # 4a. Load transcript lines
+            trans_path = backend_trans_dir / f"{m_id}.json"
+            if trans_path.exists():
+                try:
+                    with open(trans_path, 'r', encoding='utf-8') as f:
+                        trans_data = json.load(f)
+                    if isinstance(trans_data, list):
+                        for idx, item in enumerate(trans_data):
+                            doc_id = f"cb_{m_id}_transcript_{idx:04d}"
+                            if doc_id in existing_ids:
+                                continue
+                            ts = item.get("timestamp", "00:00:00")
+                            spk = item.get("speaker", "Unknown")
+                            txt = item.get("text", "")
+                            ids.append(doc_id)
+                            documents.append(f"[{meeting_title} @ {ts}] {spk}: {txt}")
+                            metadatas.append({"timestamp": ts, "speaker": spk, "source": meeting_title, "full_text": txt})
+                except Exception as e:
+                    logger.warning(f"Error loading transcript {trans_path}: {e}")
+
+            # 4b. Load summary, decisions, and action items
+            sum_doc_id = f"cb_{m_id}_summary"
+            if sum_doc_id not in existing_ids:
+                try:
+                    with open(sum_path, 'r', encoding='utf-8') as f:
+                        sum_data = json.load(f)
+                    summary_lines = [f"📋 MEETING: {meeting_title}"]
+                    if sum_data.get("summary"):
+                        summary_lines.append(f"Overview: {sum_data.get('summary')}")
+                    if sum_data.get("participants"):
+                        summary_lines.append(f"Attendees: {', '.join(sum_data.get('participants', []))}")
+                    if sum_data.get("decisions"):
+                        summary_lines.append("\n📝 Decisions Made:")
+                        for i, d in enumerate(sum_data.get("decisions", []), 1):
+                            d_txt = d.get('title') or d.get('text', '')
+                            summary_lines.append(f"   {i}. {d_txt} (Decided by: {d.get('speaker', 'Team')})")
+                    if sum_data.get("action_items"):
+                        summary_lines.append("\n✅ Action Items:")
+                        for i, a in enumerate(sum_data.get("action_items", []), 1):
+                            summary_lines.append(f"   {i}. {a.get('task', '')} (Assignee: {a.get('assignee', 'Unassigned')})")
+                    
+                    full_sum_text = "\n".join(summary_lines)
+                    ids.append(sum_doc_id)
+                    documents.append(full_sum_text)
+                    metadatas.append({"timestamp": "00:00:00", "speaker": "System", "source": meeting_title, "full_text": full_sum_text})
+                except Exception as e:
+                    logger.warning(f"Error loading summary {sum_path}: {e}")
+
+            if ids:
+                try:
+                    collection.add(ids=ids, documents=documents, metadatas=metadatas)
+                    total_added += len(ids)
+                except Exception as e:
+                    logger.warning(f"Error adding meeting {m_id} to ChromaDB: {e}")
+
+    if total_added > 0:
+        logger.info(f"✅ ChromaDB Memory Synced: Added {total_added} new meeting snippets. Total memory records: {collection.count()}")
 
 # --- HELPERS ---
 MEETING_KEYWORDS = [
@@ -212,6 +272,11 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
+    # Dynamically sync any newly uploaded meetings into ChromaDB
+    try:
+        load_all_meetings()
+    except Exception as e:
+        logger.warning(f"Notice syncing meetings on chat: {e}")
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Empty query")
     

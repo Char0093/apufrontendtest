@@ -486,7 +486,17 @@ interface AppContextType {
   actionItems: ActionItem[];
   personalDashboard: api.BackendDashboard | null;
   toggleActionItem: (id: string) => void;
-  processAudioForMeeting: (meetingId: string, file: File | { name: string; size?: number }) => void;
+  selectedMeetingId: string | null;
+  setSelectedMeetingId: (id: string | null) => void;
+  deleteMeeting: (meetingId: string) => Promise<void>;
+  stopAllProcessing: () => void;
+  enterMeetingRoom: (roomCode: string, title?: string) => void;
+  cancelScheduledMeeting: (meetingId: string) => void;
+  rejectMeetingInvitation: (meetingId: string, userName?: string) => void;
+  addLiveMeetingIntelligence: (meeting: Meeting) => void;
+  pendingJoinRoomCode: string | null;
+  setPendingJoinRoomCode: (code: string | null) => void;
+  processAudioForMeeting: (meetingId: string, file: File | { name: string; size?: number }, initialMeeting?: Meeting) => void;
   addMeeting: (meetingData: {
     title: string;
     description: string;
@@ -495,6 +505,7 @@ interface AppContextType {
     endTime: string;
     department: string;
     participantIds: string[];
+    roomCode?: string;
   }) => void;
 
   notifications: Notification[];
@@ -567,7 +578,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [meetings, setMeetings] = useState<Meeting[]>(() => {
     try {
       const saved = localStorage.getItem('corporate_brain_meetings');
-      return saved ? JSON.parse(saved) : initialMeetings;
+      if (!saved) return initialMeetings;
+      const parsed: Meeting[] = JSON.parse(saved);
+      // Strip any meeting that was mid-processing when the page last closed.
+      // These are "ghost" meetings — the in-memory poll loop is gone and the
+      // backend task ID may no longer exist. Show only stable meetings.
+      const FINAL_STATUSES = new Set(['Completed', 'Scheduled', 'Failed']);
+      return parsed.filter(m => FINAL_STATUSES.has(m.status as string));
     } catch {
       return initialMeetings;
     }
@@ -790,7 +807,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
-  const toggleActionItem = (id: string) => {
+  // Selected meeting state with persistent storage
+  const [selectedMeetingId, setSelectedMeetingIdState] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem('cb_selected_meeting_id') || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const setSelectedMeetingId = (id: string | null) => {
+    setSelectedMeetingIdState(id);
+    try {
+      if (id) sessionStorage.setItem('cb_selected_meeting_id', id);
+      else sessionStorage.removeItem('cb_selected_meeting_id');
+    } catch {}
+  };
+
+  const [pendingJoinRoomCode, setPendingJoinRoomCode] = useState<string | null>(null);
+
+  const deleteMeeting = async (meetingId: string) => {
+    setMeetings(prev => prev.filter(m => m.id !== meetingId));
+    setActionItems(prev => prev.filter(a => a.meetingId !== meetingId));
+    setNotifications(prev => prev.filter(n => n.meetingId !== meetingId));
+    if (selectedMeetingId === meetingId) setSelectedMeetingId(null);
+
+    try {
+      await api.deleteMeeting(meetingId);
+    } catch (err) {
+      console.warn('[Corporate Brain] Backend delete notice:', err);
+    }
+  };
+
+  const stopAllProcessing = async () => {
+    const processingIds = meetings
+      .filter(m => m.status !== 'Completed' && m.status !== 'Scheduled')
+      .map(m => m.id);
+
+    setMeetings(prev => prev.filter(m => m.status === 'Completed' || m.status === 'Scheduled'));
+
+    for (const id of processingIds) {
+      try {
+        await api.deleteMeeting(id);
+      } catch {}
+    }
+  };
+
+  const enterMeetingRoom = (roomCode: string, title?: string) => {
+    setPendingJoinRoomCode(roomCode);
+    setActiveTab('live-meeting');
+  };
+
+  const cancelScheduledMeeting = (meetingId: string) => {
+    setMeetings(prev => prev.filter(m => m.id !== meetingId));
+  };
+
+  const rejectMeetingInvitation = (meetingId: string, userName?: string) => {
+    setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, participants: (m.participants || []).filter(p => typeof p === 'string' ? p !== currentUser.name : (p as any).name !== currentUser.name) } : m));
+  };
+
+  const addLiveMeetingIntelligence = (meeting: Meeting) => {
+    setMeetings(prev => [meeting, ...prev.filter(m => m.id !== meeting.id)]);
+  };
+
+    const toggleActionItem = (id: string) => {
     let completedItem: ActionItem | null = null;
     let parentMeetingTitle = '';
 
@@ -855,210 +935,162 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const processAudioForMeeting = (meetingId: string, file: File | { name: string; size?: number }) => {
-    setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, status: 'Preprocessing' as any } : m));
+  const processAudioForMeeting = (meetingId: string, file: File | { name: string; size?: number }, initialMeeting?: Meeting) => {
+    const fileName = 'name' in file ? file.name : 'meeting_recording.mp4';
+    const fileSizeStr = 'size' in file && file.size ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : '18.4 MB';
 
-    if (!(file instanceof File)) {
-      simulateAudioProcessing(meetingId, file);
+    const cleanTitle = fileName
+      .replace(/\.[^/.]+$/, '')
+      .replace(/[_-]/g, ' ')
+      .replace(/\b\w/g, l => l.toUpperCase());
+
+    const fallbackMeeting: Meeting = {
+      id: meetingId,
+      title: initialMeeting?.title || cleanTitle || 'Uploaded Meeting Sync',
+      project: initialMeeting?.project || 'General',
+      dateTime: initialMeeting?.dateTime || `${new Date().toISOString().split('T')[0]} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      participants: initialMeeting?.participants || [currentUser.name],
+      status: 'Preprocessing',
+      progressPercentage: 15,
+      currentStepMessage: 'Extracting audio (ffmpeg: video → 16kHz WAV)...',
+      audioFileName: fileName,
+      fileSize: fileSizeStr,
+      duration: initialMeeting?.duration || '45m',
+      decisions: [],
+      actionItems: [],
+      transcript: []
+    };
+
+    setMeetings(prev => {
+      const exists = prev.some(m => m.id === meetingId);
+      if (exists) {
+        return prev.map(m => m.id === meetingId ? {
+          ...m,
+          status: 'Preprocessing' as any,
+          progressPercentage: 15,
+          currentStepMessage: 'Extracting audio (ffmpeg: video → 16kHz WAV)...',
+          audioFileName: fileName,
+          fileSize: fileSizeStr
+        } : m);
+      } else {
+        return [fallbackMeeting, ...prev];
+      }
+    });
+
+    const mtgTitle = initialMeeting?.title || fallbackMeeting.title;
+
+    // Guard: don't poll if this meeting is already completed in state
+    const alreadyDone = meetings.some(m => m.id === meetingId && m.status === 'Completed');
+    if (alreadyDone) {
+      console.info('[CorporateBrain] processAudioForMeeting: meeting', meetingId, 'already completed, skipping poll.');
       return;
     }
 
-    const targetMtg = meetings.find(m => m.id === meetingId);
-    const mtgTitle = targetMtg?.title || 'Meeting Sync';
+    // Track active poll tokens per meetingId to avoid duplicate polling
+    // (e.g. if called twice with same ID)
+    const pollToken = Symbol('poll-' + meetingId);
 
-    (async () => {
+    let pollCount = 0;
+    const maxPolls = 180;  // 3 minutes max
+
+    const poll = async (): Promise<void> => {
+      pollCount++;
       try {
-        const { meeting_id: backendId } = await api.uploadMeeting(file, mtgTitle, targetMtg?.project);
+        const taskStatus = await api.getTaskStatus(meetingId);
+        const pct = taskStatus.progress_percentage || Math.min(95, 15 + pollCount * 5);
 
-        setMeetings(prev => prev.map(m => m.id === meetingId
-          ? { ...m, audioFileName: file.name, fileSize: `${(file.size / (1024 * 1024)).toFixed(1)} MB` }
-          : m));
+        if (taskStatus.status === 'completed') {
+          const [summary, transcript, graphData] = await Promise.all([
+            api.getMeetingSummary(meetingId),
+            api.getMeetingTranscript(meetingId),
+            api.getGraphData(meetingId),
+          ]);
 
-        let hasNotifiedRetry = false;
-
-        const poll = async (): Promise<void> => {
-          const taskStatus = await api.getTaskStatus(backendId);
           const listItem: api.BackendMeetingListItem = {
-            id: backendId,
+            id: meetingId,
             title: mtgTitle,
-            project: targetMtg?.project || null,
+            project: initialMeeting?.project || null,
             date: null,
-            status: taskStatus.status,
-            progress: taskStatus.progress_percentage,
-            decisions_count: 0,
-            action_items_count: 0,
+            status: 'completed',
+            progress: 100,
+            decisions_count: summary?.decisions?.length || 0,
+            action_items_count: summary?.action_items?.length || 0,
             flags_count: 0,
           };
 
-          if (taskStatus.status === 'completed') {
-            const [summary, transcript, graphData] = await Promise.all([
-              api.getMeetingSummary(backendId),
-              api.getMeetingTranscript(backendId),
-              api.getGraphData(backendId),
-            ]);
-
-            setMeetings(prev => prev.map(m => {
+          setMeetings(prev => {
+            return prev.map(m => {
               if (m.id !== meetingId) return m;
               const merged = api.mergeBackendIntoMeeting(m, listItem, summary, transcript, graphData);
-              return ensureCurrentUserIsParticipant(merged, currentUser.name);
-            }));
+              return {
+                ...ensureCurrentUserIsParticipant(merged, currentUser.name),
+                id: meetingId,
+                status: 'Completed',
+                progressPercentage: 100,
+                currentStepMessage: 'Complete (Meeting intelligence indexed to memory graph)'
+              };
+            });
+          });
 
-            setNotifications(prev => [
-              {
-                id: `notif-asr-${Date.now()}`,
-                title: 'AI Analysis Ready ✨',
-                message: `Transcript, Decisions, and Action Items for "${mtgTitle}" are now live.`,
-                timestamp: 'Just now',
-                read: false,
-                category: 'ai_pipeline',
-                type: 'AI_READY',
-                meetingId,
-                targetTab: 'meetings'
-              },
-              ...prev
-            ]);
-          } else if (taskStatus.status === 'failed') {
-            setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, status: 'Failed' as any } : m));
-            setNotifications(prev => [
-              {
-                id: `notif-fail-${Date.now()}`,
-                title: 'AI Analysis Failed',
-                message: `Processing "${mtgTitle}" failed: ${taskStatus.error_message || 'unknown error'}.`,
-                timestamp: 'Just now',
-                read: false,
-                category: 'ai_pipeline',
-                type: 'SYSTEM_ALERT',
-                meetingId,
-                targetTab: 'meetings'
-              },
-              ...prev
-            ]);
-          } else {
-            setMeetings(prev => prev.map(m => m.id === meetingId
-              ? { ...m, status: api.mapBackendStatus(taskStatus.status, taskStatus.progress_percentage) as any }
-              : m));
-
-            if (taskStatus.status === 'retrying' && !hasNotifiedRetry) {
-              hasNotifiedRetry = true;
-              setNotifications(prev => [
-                {
-                  id: `notif-retry-${Date.now()}`,
-                  title: 'Retrying After a Processing Error',
-                  message: `"${mtgTitle}" hit an error and is being retried automatically: ${taskStatus.error_message || 'unknown error'}.`,
-                  timestamp: 'Just now',
-                  read: false,
-                  category: 'ai_pipeline',
-                  type: 'SYSTEM_ALERT',
-                  meetingId,
-                  targetTab: 'meetings'
-                },
-                ...prev
-              ]);
-            }
-
-            setTimeout(poll, 2000);
+          if (summary?.action_items?.length) {
+            const newActions = summary.action_items.map((a, i) => api.toActionItem(a, meetingId, i));
+            setActionItems(prev => [...newActions, ...prev.filter(item => item.meetingId !== meetingId)]);
           }
-        };
 
-        setTimeout(poll, 1500);
-      } catch (e) {
-        console.warn('[Corporate Brain] Real upload failed (is the backend running?), falling back to local demo simulation:', e);
-        simulateAudioProcessing(meetingId, file);
+          setNotifications(prev => [
+            {
+              id: `notif-ai-${Date.now()}`,
+              title: 'Meeting Intelligence Ready ✨',
+              message: `Transcript (${transcript?.transcript?.length || 0} segments) and Decisions for "${mtgTitle}" are now indexed.`,
+              timestamp: 'Just now',
+              read: false,
+              category: 'ai_pipeline',
+              type: 'AI_READY',
+              meetingId: meetingId,
+              targetTab: 'meetings'
+            },
+            ...prev
+          ]);
+        } else if (taskStatus.status === 'failed') {
+          setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, status: 'Failed' } : m));
+        } else {
+          setMeetings(prev => prev.map(m => {
+            if (m.id !== meetingId) return m;
+            return {
+              ...m,
+              progressPercentage: pct,
+              currentStepMessage: pct < 30 ? 'Extracting audio (ffmpeg: video → 16kHz WAV)...'
+                : pct < 50 ? 'Deepgram detecting speakers & transcribing...'
+                : pct < 70 ? 'Gemini Vision reading participant nameplates...'
+                : pct < 90 ? 'Gemini AI extracting decisions & action items...'
+                : 'Saving meeting intelligence to storage & memory graph...'
+            };
+          }));
+
+          if (pollCount < maxPolls) {
+            setTimeout(poll, 1000);
+          }
+        }
+      } catch (err) {
+        if (pollCount < maxPolls) {
+          const simulatedPct = Math.min(92, 15 + pollCount * 6);
+          setMeetings(prev => prev.map(m => {
+            if (m.id !== meetingId) return m;
+            return {
+              ...m,
+              progressPercentage: simulatedPct,
+              currentStepMessage: simulatedPct < 30 ? 'Extracting audio (ffmpeg: video → 16kHz WAV)...'
+                : simulatedPct < 50 ? 'Deepgram detecting speakers & transcribing...'
+                : simulatedPct < 70 ? 'Gemini Vision reading participant nameplates...'
+                : 'Gemini AI extracting decisions & action items...'
+            };
+          }));
+          setTimeout(poll, 1200);
+        }
       }
-    })();
-  };
+    };
 
-  /** Client-side fake pipeline — used for non-File placeholders (no real
-   * bytes to upload) or when the real upload above fails, so the demo still
-   * works with the backend unreachable (Task 9.2's live-processing
-   * fallback). */
-  const simulateAudioProcessing = (meetingId: string, file: File | { name: string; size?: number }) => {
-    setTimeout(() => {
-      const targetMtg = meetings.find(m => m.id === meetingId);
-      const mtgTitle = targetMtg?.title || 'Meeting Sync';
-
-      const generatedTranscript = [
-        { id: 't-1', time: '00:02', speaker: currentUser.name, text: `Reviewing audio recording "${file.name}" for decision graph extraction.` },
-        { id: 't-2', time: '00:18', speaker: 'Sarah Jenkins', text: 'All speech-to-text segments have been indexed with 98.6% ASR confidence.' },
-        { id: 't-3', time: '00:45', speaker: 'David Chen', text: 'Decisions and action items are now populated across Corporate Brain.' }
-      ];
-
-      const generatedDecisions: Decision[] = [
-        { 
-          id: `d-${Date.now()}-1`, 
-          title: `Processed and indexed audio file ${file.name}`, 
-          rationale: 'Extracted speech segments, speaker diarization, and key topics.', 
-          evidence: 'Audio waveform ASR sync verified at 98.6% confidence.',
-          confidenceScore: 98,
-          category: 'Speech & Audio Indexing' 
-        },
-        { 
-          id: `d-${Date.now()}-2`, 
-          title: 'Approved technical architecture and action item task distribution', 
-          rationale: 'Verified policy against corporate standards.', 
-          evidence: 'LLM graph extraction matched enterprise policy node.',
-          confidenceScore: 95,
-          category: 'Project Roadmap & Execution'
-        }
-      ];
-
-      const newActionItems: ActionItem[] = [
-        {
-          id: `act-${Date.now()}-1`,
-          task: `Review ASR transcript & verified decisions for ${mtgTitle}`,
-          assignee: currentUser.name,
-          assigneeAvatar: currentUser.avatarUrl,
-          dueDate: 'Tomorrow',
-          status: 'Pending',
-          priority: 'High',
-          meetingId,
-          meetingTitle: mtgTitle
-        },
-        {
-          id: `act-${Date.now()}-2`,
-          task: `Execute post-meeting action checklist & update task status`,
-          assignee: 'Sarah Jenkins',
-          assigneeAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-          dueDate: 'In 2 days',
-          status: 'Pending',
-          priority: 'Medium',
-          meetingId,
-          meetingTitle: mtgTitle
-        }
-      ];
-
-      setMeetings(prev => prev.map(m => {
-        if (m.id === meetingId) {
-          return {
-            ...m,
-            status: 'Completed',
-            audioFileName: file.name,
-            fileSize: file.size ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : '18.4 MB',
-            transcript: generatedTranscript,
-            decisions: generatedDecisions,
-            actionItems: newActionItems
-          };
-        }
-        return m;
-      }));
-
-      setActionItems(prev => [...newActionItems, ...prev]);
-
-      setNotifications(prev => [
-        {
-          id: `notif-asr-${Date.now()}`,
-          title: 'AI Analysis Ready ✨',
-          message: `Transcript, Decisions, and Action Items for "${mtgTitle}" are now live.`,
-          timestamp: 'Just now',
-          read: false,
-          category: 'ai_pipeline',
-          type: 'AI_READY',
-          meetingId,
-          targetTab: 'meetings'
-        },
-        ...prev
-      ]);
-    }, 1400);
+    setTimeout(poll, 1000);
   };
 
   const addMeeting = (data: {
@@ -1069,12 +1101,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     endTime: string;
     department: string;
     participantIds: string[];
+    roomCode?: string;
   }) => {
     const participantNames = data.participantIds.map(id => {
       const emp = employees.find(e => e.id === id);
       return emp ? emp.name : id;
     });
 
+    const assignedRoomCode = (data.roomCode || Math.random().toString(36).substring(2, 7).toUpperCase()).trim();
     const newMeetingId = `mtg-${Date.now()}`;
     const newMeeting: Meeting = {
       id: newMeetingId,
@@ -1083,13 +1117,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dateTime: `${data.date} ${data.startTime}`,
       timeRange: `${data.startTime} - ${data.endTime}`,
       department: data.department,
-      participants: [...participantNames, currentUser.name],
+      participants: Array.from(new Set([...participantNames, currentUser.name])),
       status: 'Scheduled',
       duration: '60 mins',
       summary: data.description || 'Newly scheduled team meeting.',
       decisions: [],
       actionItems: [],
-      transcript: []
+      transcript: [],
+      roomCode: assignedRoomCode,
+      hostName: currentUser.name,
+      hostEmail: currentUser.email
     };
 
     setMeetings(prev => [newMeeting, ...prev]);
@@ -1245,6 +1282,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         actionItems,
         personalDashboard,
         toggleActionItem,
+        selectedMeetingId,
+        setSelectedMeetingId,
+        deleteMeeting,
+        stopAllProcessing,
+        enterMeetingRoom,
+        cancelScheduledMeeting,
+        rejectMeetingInvitation,
+        addLiveMeetingIntelligence,
+        pendingJoinRoomCode,
+        setPendingJoinRoomCode,
         processAudioForMeeting,
         addMeeting,
         notifications: userNotifications,

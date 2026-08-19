@@ -2,6 +2,9 @@
 setlocal
 cd /d "%~dp0"
 
+:: Force UTF-8 output so emoji in log messages don't crash on Windows GBK terminals
+set PYTHONIOENCODING=utf-8
+
 echo ============================================
 echo   Corporate Brain - Starting all services
 echo ============================================
@@ -25,6 +28,15 @@ if errorlevel 2 (
     set "DEMO_MODE=true"
     echo [DEMO] External transcription and LLM API calls are disabled.
 )
+echo.
+
+echo [0/4] Releasing port 8000 (killing any existing backend process)...
+for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":8000 "') do (
+    if not "%%a"=="0" (
+        taskkill /F /PID %%a >nul 2>&1
+    )
+)
+echo       Port 8000 is free.
 echo.
 
 echo [1/4] Starting Redis + Neo4j + LiveKit (Docker)...
@@ -55,13 +67,13 @@ if exist "backend\.venv\.deps_installed" (
     echo done > "backend\.venv\.deps_installed"
 )
 
-echo [3/4] Starting backend API + Ask Coco server + Celery worker...
-
-start "Corporate Brain - Backend API" cmd /k "cd /d "%~dp0backend" && .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
+echo [3/4] Starting backend API server...
+:: NOTE: --reload is intentionally removed - it causes WinError 10013 when files change.
+:: The server now starts cleanly and stays stable. Restart start.bat to apply code changes.
+start "Corporate Brain - Backend API" cmd /k "set PYTHONIOENCODING=utf-8 && cd /d "%~dp0backend" && .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
 if exist "ASK COCO\server.py" (
     start "Corporate Brain - Ask Coco Server" cmd /k ""%~dp0launch_askcoco.bat""
 )
-start "Corporate Brain - Celery Worker" cmd /k "cd /d "%~dp0backend" && .venv\Scripts\python.exe -m celery -A app.core.celery_app worker --loglevel=info --pool=solo"
 
 echo [4/4] Starting frontend dev server...
 if exist "frontend\node_modules\.deps_installed" (
