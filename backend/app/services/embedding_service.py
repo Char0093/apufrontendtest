@@ -73,6 +73,7 @@ def _stable_hash(text: str) -> str:
 
 
 def index_meeting(meeting_id: str, filename: str, intelligence: MeetingIntelligence) -> None:
+    """Index meeting transcript snippets and decisions into ChromaDB using cloud embeddings."""
     try:
         snippets = get_snippets_collection()
         docs, metas, ids = [], [], []
@@ -99,7 +100,8 @@ def index_meeting(meeting_id: str, filename: str, intelligence: MeetingIntellige
         decisions = get_decisions_collection()
         d_docs, d_metas, d_ids = [], [], []
         for i, d in enumerate(intelligence.decisions):
-            d_docs.append(d.text or d.title or "")
+            text_val = d.text or d.title or ""
+            d_docs.append(text_val)
             d_metas.append({
                 "meeting_id": meeting_id,
                 "confidence": d.confidence.value if hasattr(d.confidence, "value") else str(d.confidence),
@@ -107,7 +109,7 @@ def index_meeting(meeting_id: str, filename: str, intelligence: MeetingIntellige
                 "speaker": d.speaker,
                 "filename": filename,
             })
-            d_ids.append(f"{meeting_id}_decision_{i}_{_stable_hash(d.text or d.title or '')}")
+            d_ids.append(f"{meeting_id}_decision_{i}_{_stable_hash(text_val)}")
 
         if d_docs:
             decisions.upsert(documents=d_docs, metadatas=d_metas, ids=d_ids)
@@ -115,3 +117,50 @@ def index_meeting(meeting_id: str, filename: str, intelligence: MeetingIntellige
         logger.info(f"Indexed meeting {meeting_id} ({len(docs)} snippets, {len(d_docs)} decisions)")
     except Exception as e:
         logger.warning(f"Vector indexing notice for meeting {meeting_id}: {e}")
+
+
+def query_similar_decisions(decision_text: str, exclude_meeting_id: str, n_results: int = 3) -> list[dict]:
+    """Nearest-neighbor past decisions from OTHER meetings for contradiction detection."""
+    try:
+        collection = get_decisions_collection()
+        if collection.count() == 0:
+            return []
+
+        results = collection.query(
+            query_texts=[decision_text],
+            n_results=min(n_results + 3, collection.count()),
+        )
+
+        matches = []
+        if results.get("documents") and results["documents"][0]:
+            for doc, meta, dist in zip(
+                results["documents"][0], results["metadatas"][0], results.get("distances", [[0.0]*len(results["documents"][0])])[0]
+            ):
+                if meta and meta.get("meeting_id") == exclude_meeting_id:
+                    continue
+                matches.append({
+                    "text": doc,
+                    "meeting_id": meta.get("meeting_id") if meta else "",
+                    "distance": dist if dist is not None else 0.5
+                })
+                if len(matches) >= n_results:
+                    break
+        return matches
+    except Exception as e:
+        logger.warning(f"query_similar_decisions notice: {e}")
+        return []
+
+
+def delete_meeting(meeting_id: str) -> None:
+    """Delete vector embeddings for meeting_id from ChromaDB."""
+    try:
+        snippets = get_snippets_collection()
+        snippets.delete(where={"meeting_id": meeting_id})
+    except Exception as e:
+        logger.warning(f"ChromaDB snippets delete for meeting {meeting_id} notice: {e}")
+
+    try:
+        decisions = get_decisions_collection()
+        decisions.delete(where={"meeting_id": meeting_id})
+    except Exception as e:
+        logger.warning(f"ChromaDB decisions delete for meeting {meeting_id} notice: {e}")
