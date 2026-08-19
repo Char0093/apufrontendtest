@@ -8,7 +8,8 @@ import type {
   ProcessingStatus,
 } from '../types';
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8000';
+const rawBase = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = rawBase.replace(/\/+$/, '');
 
 // ── Backend response shapes (docs/IMPLEMENTATION_PLAN.md Phase 5) ─────────
 

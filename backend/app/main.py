@@ -37,19 +37,8 @@ app = FastAPI(title="Corporate Brain API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        # Vite may bind to IPv6 loopback and browsers then use this origin.
-        "http://[::1]:5173",
-    ],
-    # Development clients may open Vite through the host computer's private
-    # LAN address. Public deployments should use explicit HTTPS origins.
-    allow_origin_regex=(
-        r"^https?://(?:localhost|127\.0\.0\.1|\[::1\]|10(?:\.\d{1,3}){3}|"
-        r"192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])"
-        r"(?:\.\d{1,3}){2})(?::\d+)?$"
-    ),
+    allow_origins=["*"],
+    allow_origin_regex=r"^https?://.*$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
