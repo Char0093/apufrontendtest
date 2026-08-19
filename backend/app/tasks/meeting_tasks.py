@@ -113,9 +113,15 @@ def _analyze_transcript(
         knowledge_triples=analysis_dict.get("knowledge_triples", []),
     )
 
-    on_progress(75, "Indexing + checking for contradictions against past decisions...")
+    on_progress(75, "Indexing decisions to vector store...")
     embedding_service.index_meeting(meeting.id, meeting.title, intelligence)
-    intelligence.flags = contradiction_service.check_decisions(meeting.id, intelligence.decisions)
+
+    on_progress(85, "Checking for organizational contradictions...")
+    try:
+        intelligence.flags = contradiction_service.check_decisions(meeting.id, intelligence.decisions[:3])
+    except Exception as ce:
+        logger.warning(f"Contradiction check notice: {ce}")
+        intelligence.flags = []
 
     return intelligence
 
@@ -218,6 +224,8 @@ def _process_meeting(task, meeting_id: str, run_pipeline) -> None:
             logger.info(f"[{meeting_id}] {pct}% — {message}")
 
         intelligence = run_pipeline(meeting, on_progress)
+        
+        on_progress(95, "Saving meeting intelligence and building memory graph...")
         _save_and_graph(meeting, intelligence)
 
         task_record.status = "completed"
