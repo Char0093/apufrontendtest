@@ -1,71 +1,34 @@
 import hashlib
+import json
 import logging
 import os
-from typing import Optional
+from pathlib import Path
+from typing import List, Dict, Optional
+import numpy as np
 
-import chromadb
 from app.core.config import get_settings
 from app.schemas.meeting_intelligence import MeetingIntelligence
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-_client = None
-_embedding_fn = None
-_snippets_collection = None
-_decisions_collection = None
+_EMBED_DIR = Path(settings.storage_path) / "embeddings"
+_EMBED_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _get_client():
-    global _client, _embedding_fn
-    if _client is None:
+def _get_embed_fn():
+    """Returns Google GenAI Cloud Embedding function (0MB RAM)."""
+    if settings.gemini_api_key:
         try:
-            _client = chromadb.PersistentClient(path=settings.chroma_path)
+            os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
+            from chromadb.utils.embedding_functions import GoogleGenaiEmbeddingFunction
+            return GoogleGenaiEmbeddingFunction(
+                model_name="gemini-embedding-001",
+                api_key_env_var="GEMINI_API_KEY",
+            )
         except Exception as e:
-            logger.warning(f"ChromaDB client init notice: {e}")
-            _client = chromadb.Client()
-
-        # Cloud API Embeddings (0MB RAM): Verified working with Google GenAI API
-        try:
-            if settings.gemini_api_key:
-                os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
-                from chromadb.utils.embedding_functions import GoogleGenaiEmbeddingFunction
-                _embedding_fn = GoogleGenaiEmbeddingFunction(
-                    model_name="gemini-embedding-001",
-                    api_key_env_var="GEMINI_API_KEY",
-                )
-                logger.info("Initialized Google GenAI Cloud Embedding function (0MB RAM)")
-            else:
-                _embedding_fn = None
-        except Exception as e:
-            logger.warning(f"Embedding function init notice: {e}")
-            _embedding_fn = None
-    return _client
-
-
-def _get_collection(name: str):
-    client = _get_client()
-    try:
-        if _embedding_fn:
-            return client.get_or_create_collection(name=name, embedding_function=_embedding_fn)
-        return client.get_or_create_collection(name=name)
-    except Exception as e:
-        logger.warning(f"Collection {name} fallback init: {e}")
-        return client.get_or_create_collection(name=name)
-
-
-def get_snippets_collection():
-    global _snippets_collection
-    if _snippets_collection is None:
-        _snippets_collection = _get_collection("meeting_snippets")
-    return _snippets_collection
-
-
-def get_decisions_collection():
-    global _decisions_collection
-    if _decisions_collection is None:
-        _decisions_collection = _get_collection("decisions")
-    return _decisions_collection
+            logger.warning(f"Google GenAI Embedding init notice: {e}")
+    return None
 
 
 def _stable_hash(text: str) -> str:
@@ -73,94 +36,107 @@ def _stable_hash(text: str) -> str:
 
 
 def index_meeting(meeting_id: str, filename: str, intelligence: MeetingIntelligence) -> None:
-    """Index meeting transcript snippets and decisions into ChromaDB using cloud embeddings."""
+    """Index meeting decisions and summary into pure-Python vector store (100% cloud stable)."""
     try:
-        snippets = get_snippets_collection()
-        docs, metas, ids = [], [], []
+        embed_fn = _get_embed_fn()
+        records = []
 
-        if intelligence.summary:
-            docs.append(f"Meeting Summary ({filename}): {intelligence.summary}")
-            metas.append({"meeting_id": meeting_id, "type": "summary", "filename": filename})
-            ids.append(f"{meeting_id}_summary")
-
-        for i, line in enumerate(intelligence.transcript):
-            docs.append(f"[{line.timestamp}] {line.speaker}: {line.text}")
-            metas.append({
-                "meeting_id": meeting_id,
-                "type": "transcript",
-                "speaker": line.speaker,
-                "timestamp": line.timestamp,
-                "filename": filename,
-            })
-            ids.append(f"{meeting_id}_line_{i}_{_stable_hash(line.text)}")
-
-        if docs:
-            snippets.upsert(documents=docs, metadatas=metas, ids=ids)
-
-        decisions = get_decisions_collection()
-        d_docs, d_metas, d_ids = [], [], []
+        # 1. Embed decisions
         for i, d in enumerate(intelligence.decisions):
-            text_val = d.text or d.title or ""
-            d_docs.append(text_val)
-            d_metas.append({
+            txt = (d.text or d.title or "").strip()
+            if not txt:
+                continue
+            
+            vec = []
+            if embed_fn:
+                try:
+                    res = embed_fn([txt])
+                    if res and len(res) > 0:
+                        vec = res[0].tolist() if hasattr(res[0], "tolist") else list(res[0])
+                except Exception as ex:
+                    logger.warning(f"Embedding generate notice for decision '{txt}': {ex}")
+
+            records.append({
+                "id": f"{meeting_id}_dec_{i}_{_stable_hash(txt)}",
                 "meeting_id": meeting_id,
-                "confidence": d.confidence.value if hasattr(d.confidence, "value") else str(d.confidence),
-                "timestamp": d.timestamp,
+                "type": "decision",
+                "text": txt,
                 "speaker": d.speaker,
+                "timestamp": d.timestamp,
                 "filename": filename,
+                "vector": vec,
             })
-            d_ids.append(f"{meeting_id}_decision_{i}_{_stable_hash(text_val)}")
 
-        if d_docs:
-            decisions.upsert(documents=d_docs, metadatas=d_metas, ids=d_ids)
+        # 2. Save records to persistent disk file
+        file_path = _EMBED_DIR / f"{meeting_id}.json"
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(records, f)
 
-        logger.info(f"Indexed meeting {meeting_id} ({len(docs)} snippets, {len(d_docs)} decisions)")
+        logger.info(f"Indexed {len(records)} decision embeddings for meeting {meeting_id}")
     except Exception as e:
-        logger.warning(f"Vector indexing notice for meeting {meeting_id}: {e}")
+        logger.warning(f"Vector indexing skipped for meeting {meeting_id}: {e}")
 
 
-def query_similar_decisions(decision_text: str, exclude_meeting_id: str, n_results: int = 3) -> list[dict]:
-    """Nearest-neighbor past decisions from OTHER meetings for contradiction detection."""
+def query_similar_decisions(decision_text: str, exclude_meeting_id: str, n_results: int = 3) -> List[Dict]:
+    """Nearest-neighbor search across stored decision vectors using cosine similarity."""
     try:
-        collection = get_decisions_collection()
-        if collection.count() == 0:
+        embed_fn = _get_embed_fn()
+        if not embed_fn:
             return []
 
-        results = collection.query(
-            query_texts=[decision_text],
-            n_results=min(n_results + 3, collection.count()),
-        )
+        query_vec = None
+        try:
+            res = embed_fn([decision_text])
+            if res and len(res) > 0:
+                query_vec = np.array(res[0], dtype=np.float32)
+        except Exception as ex:
+            logger.warning(f"Query embedding notice: {ex}")
+            return []
 
-        matches = []
-        if results.get("documents") and results["documents"][0]:
-            for doc, meta, dist in zip(
-                results["documents"][0], results["metadatas"][0], results.get("distances", [[0.0]*len(results["documents"][0])])[0]
-            ):
-                if meta and meta.get("meeting_id") == exclude_meeting_id:
-                    continue
-                matches.append({
-                    "text": doc,
-                    "meeting_id": meta.get("meeting_id") if meta else "",
-                    "distance": dist if dist is not None else 0.5
-                })
-                if len(matches) >= n_results:
-                    break
-        return matches
+        if query_vec is None or len(query_vec) == 0:
+            return []
+
+        # Scan all stored meeting embedding files
+        candidates = []
+        norm_q = np.linalg.norm(query_vec)
+        if norm_q == 0:
+            return []
+
+        for fpath in _EMBED_DIR.glob("*.json"):
+            if fpath.stem == exclude_meeting_id:
+                continue
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    recs = json.load(f)
+                for r in recs:
+                    v = r.get("vector")
+                    if v and len(v) == len(query_vec):
+                        cand_v = np.array(v, dtype=np.float32)
+                        norm_c = np.linalg.norm(cand_v)
+                        if norm_c > 0:
+                            # Cosine distance = 1 - cosine similarity
+                            sim = float(np.dot(query_vec, cand_v) / (norm_q * norm_c))
+                            dist = max(0.0, 1.0 - sim)
+                            candidates.append({
+                                "text": r["text"],
+                                "meeting_id": r["meeting_id"],
+                                "distance": dist,
+                            })
+            except Exception:
+                continue
+
+        candidates.sort(key=lambda x: x["distance"])
+        return candidates[:n_results]
     except Exception as e:
         logger.warning(f"query_similar_decisions notice: {e}")
         return []
 
 
 def delete_meeting(meeting_id: str) -> None:
-    """Delete vector embeddings for meeting_id from ChromaDB."""
+    """Delete vector file for meeting_id."""
     try:
-        snippets = get_snippets_collection()
-        snippets.delete(where={"meeting_id": meeting_id})
+        fpath = _EMBED_DIR / f"{meeting_id}.json"
+        if fpath.exists():
+            fpath.unlink()
     except Exception as e:
-        logger.warning(f"ChromaDB snippets delete for meeting {meeting_id} notice: {e}")
-
-    try:
-        decisions = get_decisions_collection()
-        decisions.delete(where={"meeting_id": meeting_id})
-    except Exception as e:
-        logger.warning(f"ChromaDB decisions delete for meeting {meeting_id} notice: {e}")
+        logger.warning(f"Delete meeting vector file notice: {e}")
