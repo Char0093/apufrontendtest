@@ -40,9 +40,18 @@ def extract_names_from_video(video_path: str) -> Dict[float, List[str]]:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 1)
         duration_s = total_frames / fps
 
-        # 2 strategically placed frames are 100% sufficient for Zoom / Google Meet tiles
-        if duration_s > 0:
-            sample_timestamps = [duration_s * 0.15, duration_s * 0.50, duration_s * 0.85]
+        # Sample 6 distributed frames across the meeting to capture when different speakers open mic
+        if duration_s > 10:
+            sample_timestamps = [
+                duration_s * 0.08,
+                duration_s * 0.25,
+                duration_s * 0.42,
+                duration_s * 0.58,
+                duration_s * 0.75,
+                duration_s * 0.90,
+            ]
+        elif duration_s > 0:
+            sample_timestamps = [duration_s * 0.2, duration_s * 0.6]
         else:
             sample_timestamps = [0.0]
 
