@@ -14,7 +14,6 @@ google-genai>=0.8.0
 opencv-python-headless==4.10.0.84
 neo4j==5.27.0
 chromadb>=0.4.0
-sentence-transformers>=2.0.0
 openai>=1.0.0
 
 # Live Meeting Rooms (LiveKit)

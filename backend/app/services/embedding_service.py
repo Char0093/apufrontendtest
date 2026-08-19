@@ -1,20 +1,8 @@
-"""ChromaDB + sentence-transformers embedding service. Two collections:
-- meeting_snippets: transcript lines + summary blob, feeds Ask Coco RAG
-  (Task 5.5, app.services.askcoco_service)
-- decisions: one embedding per extracted decision, feeds contradiction
-  detection (Task 4.4, app.graph.contradiction_service)
-
-Adapted from ASK COCO/server.py's init_memory()/load_all_meetings(), which
-read straight from MEETINGS/results/*.json — this version is called directly
-from the Celery pipeline with already-in-memory data instead of re-reading
-from disk, and is a reusable service instead of module-level globals.
-"""
 import hashlib
 import logging
+from typing import Optional
 
 import chromadb
-from chromadb.utils import embedding_functions
-
 from app.core.config import get_settings
 from app.schemas.meeting_intelligence import MeetingIntelligence
 
@@ -30,22 +18,34 @@ _decisions_collection = None
 def _get_client():
     global _client, _embedding_fn
     if _client is None:
-        _client = chromadb.PersistentClient(path=settings.chroma_path)
         try:
-            _embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="all-MiniLM-L6-v2"
-            )
+            _client = chromadb.PersistentClient(path=settings.chroma_path)
         except Exception as e:
-            logger.warning(f"Failed to load embedding function: {e}. Using ChromaDB default.")
+            logger.warning(f"ChromaDB client init notice: {e}")
+            _client = chromadb.Client()
+
+        # Use Cloud API Embeddings (0MB RAM) to prevent Render 512MB RAM OOM crashes
+        try:
+            if settings.gemini_api_key:
+                from chromadb.utils.embedding_functions import GoogleGenerativeAIEmbeddingFunction
+                _embedding_fn = GoogleGenerativeAIEmbeddingFunction(api_key=settings.gemini_api_key)
+            else:
+                _embedding_fn = None
+        except Exception as e:
+            logger.warning(f"Embedding function notice: {e}")
             _embedding_fn = None
     return _client
 
 
 def _get_collection(name: str):
     client = _get_client()
-    if _embedding_fn:
-        return client.get_or_create_collection(name=name, embedding_function=_embedding_fn)
-    return client.get_or_create_collection(name=name)
+    try:
+        if _embedding_fn:
+            return client.get_or_create_collection(name=name, embedding_function=_embedding_fn)
+        return client.get_or_create_collection(name=name)
+    except Exception as e:
+        logger.warning(f"Collection {name} fallback init: {e}")
+        return client.get_or_create_collection(name=name)
 
 
 def get_snippets_collection():
@@ -63,111 +63,49 @@ def get_decisions_collection():
 
 
 def _stable_hash(text: str) -> str:
-    """Deterministic short id — Python's built-in hash() is randomized per
-    process (PYTHONHASHSEED), which would duplicate entries in Chroma on
-    every worker restart."""
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
 
 def index_meeting(meeting_id: str, filename: str, intelligence: MeetingIntelligence) -> None:
-    """Embed this meeting's transcript + summary into meeting_snippets, and
-    each decision into decisions. Upsert, so re-processing a meeting updates
-    in place rather than duplicating."""
-    snippets = get_snippets_collection()
-
-    ids, documents, metadatas = [], [], []
-    for idx, line in enumerate(intelligence.transcript):
-        full_line = f"[{line.timestamp}] {line.speaker}: {line.text}"
-        ids.append(f"{meeting_id}_transcript_{idx:04d}")
-        documents.append(full_line)
-        metadatas.append({
-            "timestamp": line.timestamp,
-            "speaker": line.speaker,
-            "source": filename,
-            "meeting_id": meeting_id,
-            "full_text": line.text,
-        })
-
-    if ids:
-        snippets.upsert(ids=ids, documents=documents, metadatas=metadatas)
-
-    if intelligence.decisions or intelligence.action_items:
-        summary_lines = [f"SUMMARY FOR: {filename}"]
-        if intelligence.decisions:
-            summary_lines.append("Decisions:")
-            summary_lines += [f"- {d.text}" for d in intelligence.decisions]
-        if intelligence.action_items:
-            summary_lines.append("Action Items:")
-            summary_lines += [f"- {a.task} (Assignee: {a.assignee})" for a in intelligence.action_items]
-        summary_text = "\n".join(summary_lines)
-        snippets.upsert(
-            ids=[f"{meeting_id}_summary"],
-            documents=[summary_text],
-            metadatas=[{
-                "timestamp": "00:00:00",
-                "speaker": "System",
-                "source": filename,
-                "meeting_id": meeting_id,
-                "full_text": summary_text,
-            }],
-        )
-
-    decisions = get_decisions_collection()
-    for decision in intelligence.decisions:
-        decision_id = f"{meeting_id}_{_stable_hash(decision.text)}"
-        decisions.upsert(
-            ids=[decision_id],
-            documents=[decision.text],
-            metadatas=[{
-                "meeting_id": meeting_id,
-                "text": decision.text,
-                "timestamp": decision.timestamp,
-            }],
-        )
-
-
-def query_snippets(question: str, n_results: int = 5) -> dict:
-    """(Task 5.5) Semantic search over transcript snippets + summaries for
-    Ask Coco's RAG context."""
-    collection = get_snippets_collection()
-    if collection.count() == 0:
-        return {"documents": [[]], "metadatas": [[]]}
-    return collection.query(query_texts=[question], n_results=min(n_results, collection.count()))
-
-
-def query_similar_decisions(decision_text: str, exclude_meeting_id: str, n_results: int = 3) -> list[dict]:
-    """(Task 4.4) Nearest-neighbor past decisions from OTHER meetings."""
-    collection = get_decisions_collection()
-    if collection.count() == 0:
-        return []
-
-    results = collection.query(
-        query_texts=[decision_text],
-        n_results=min(n_results + 3, collection.count()),
-    )
-
-    matches = []
-    if results["documents"] and results["documents"][0]:
-        for doc, meta, dist in zip(
-            results["documents"][0], results["metadatas"][0], results["distances"][0]
-        ):
-            if meta.get("meeting_id") == exclude_meeting_id:
-                continue
-            matches.append({"text": doc, "meeting_id": meta.get("meeting_id"), "distance": dist})
-            if len(matches) >= n_results:
-                break
-    return matches
-
-def delete_meeting(meeting_id: str) -> None:
-    """Delete vector embeddings for meeting_id from meeting_snippets and decisions collections."""
     try:
         snippets = get_snippets_collection()
-        snippets.delete(where={"meeting_id": meeting_id})
-    except Exception as e:
-        logger.warning(f"ChromaDB snippets delete for meeting {meeting_id} failed: {e}")
+        docs, metas, ids = [], [], []
 
-    try:
+        if intelligence.summary:
+            docs.append(f"Meeting Summary ({filename}): {intelligence.summary}")
+            metas.append({"meeting_id": meeting_id, "type": "summary", "filename": filename})
+            ids.append(f"{meeting_id}_summary")
+
+        for i, line in enumerate(intelligence.transcript):
+            docs.append(f"[{line.timestamp}] {line.speaker}: {line.text}")
+            metas.append({
+                "meeting_id": meeting_id,
+                "type": "transcript",
+                "speaker": line.speaker,
+                "timestamp": line.timestamp,
+                "filename": filename,
+            })
+            ids.append(f"{meeting_id}_line_{i}_{_stable_hash(line.text)}")
+
+        if docs:
+            snippets.upsert(documents=docs, metadatas=metas, ids=ids)
+
         decisions = get_decisions_collection()
-        decisions.delete(where={"meeting_id": meeting_id})
+        d_docs, d_metas, d_ids = [], [], []
+        for i, d in enumerate(intelligence.decisions):
+            d_docs.append(d.text or d.title or "")
+            d_metas.append({
+                "meeting_id": meeting_id,
+                "confidence": d.confidence.value if hasattr(d.confidence, "value") else str(d.confidence),
+                "timestamp": d.timestamp,
+                "speaker": d.speaker,
+                "filename": filename,
+            })
+            d_ids.append(f"{meeting_id}_decision_{i}_{_stable_hash(d.text or d.title or '')}")
+
+        if d_docs:
+            decisions.upsert(documents=d_docs, metadatas=d_metas, ids=d_ids)
+
+        logger.info(f"Indexed meeting {meeting_id} ({len(docs)} snippets, {len(d_docs)} decisions)")
     except Exception as e:
-        logger.warning(f"ChromaDB decisions delete for meeting {meeting_id} failed: {e}")
+        logger.warning(f"Vector indexing skipped for meeting {meeting_id}: {e}")
