@@ -1071,7 +1071,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setTimeout(poll, 1000);
           }
         }
-      } catch (err) {
+      } catch (err: any) {
+        const is404 = err?.message?.includes('404') || err?.status === 404;
+        if (is404 && pollCount > 15) {
+          console.warn('[Corporate Brain] Task not found on server (container restarted). Stopping poll for:', meetingId);
+          setMeetings(prev => prev.map(m => m.id === meetingId ? {
+            ...m,
+            status: 'Failed' as any,
+            currentStepMessage: 'Processing interrupted by server restart. Please upload again.'
+          } : m));
+          return;
+        }
+
         if (pollCount < maxPolls) {
           const simulatedPct = Math.min(92, 15 + pollCount * 6);
           setMeetings(prev => prev.map(m => {
