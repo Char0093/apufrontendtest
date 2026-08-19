@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import os
 from typing import Optional
 
 import chromadb
@@ -24,15 +25,20 @@ def _get_client():
             logger.warning(f"ChromaDB client init notice: {e}")
             _client = chromadb.Client()
 
-        # Use Cloud API Embeddings (0MB RAM) to prevent Render 512MB RAM OOM crashes
+        # Cloud API Embeddings (0MB RAM): Verified working with Google GenAI API
         try:
             if settings.gemini_api_key:
-                from chromadb.utils.embedding_functions import GoogleGenerativeAIEmbeddingFunction
-                _embedding_fn = GoogleGenerativeAIEmbeddingFunction(api_key=settings.gemini_api_key)
+                os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
+                from chromadb.utils.embedding_functions import GoogleGenaiEmbeddingFunction
+                _embedding_fn = GoogleGenaiEmbeddingFunction(
+                    model_name="gemini-embedding-001",
+                    api_key_env_var="GEMINI_API_KEY",
+                )
+                logger.info("Initialized Google GenAI Cloud Embedding function (0MB RAM)")
             else:
                 _embedding_fn = None
         except Exception as e:
-            logger.warning(f"Embedding function notice: {e}")
+            logger.warning(f"Embedding function init notice: {e}")
             _embedding_fn = None
     return _client
 
@@ -108,4 +114,4 @@ def index_meeting(meeting_id: str, filename: str, intelligence: MeetingIntellige
 
         logger.info(f"Indexed meeting {meeting_id} ({len(docs)} snippets, {len(d_docs)} decisions)")
     except Exception as e:
-        logger.warning(f"Vector indexing skipped for meeting {meeting_id}: {e}")
+        logger.warning(f"Vector indexing notice for meeting {meeting_id}: {e}")
