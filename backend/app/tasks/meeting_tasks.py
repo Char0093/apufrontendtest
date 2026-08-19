@@ -134,11 +134,15 @@ def _run_pipeline(meeting: Meeting, on_progress) -> MeetingIntelligence:
     raw_path = str((storage.base_path / meeting.file_path).resolve())
     audio_path = str(storage.base_path / "audio" / f"{meeting.id}.wav")
 
+    import gc
+
     on_progress(15, "Extracting audio (ffmpeg: video → 16kHz WAV)...")
     audio_path = asr_service.extract_audio(raw_path, audio_path)
+    gc.collect()
 
     on_progress(35, "Speaker diarization & Deepgram transcription...")
     segments = asr_service.run_deepgram_transcription(audio_path)
+    gc.collect()
 
     on_progress(55, "Aligning speech segments...")
     name_timestamps: dict = {}
@@ -148,10 +152,13 @@ def _run_pipeline(meeting: Meeting, on_progress) -> MeetingIntelligence:
             name_timestamps = vision_service.extract_names_from_video(raw_path)
         except Exception as ve:
             logger.warning(f"Vision name extraction skipped: {ve}")
+        gc.collect()
 
     all_detected_names = list({n for names in name_timestamps.values() for n in names})
 
-    return _analyze_transcript(meeting, segments, on_progress, name_timestamps, all_detected_names)
+    res = _analyze_transcript(meeting, segments, on_progress, name_timestamps, all_detected_names)
+    gc.collect()
+    return res
 
 
 def _save_and_graph(meeting: Meeting, intelligence: MeetingIntelligence) -> None:

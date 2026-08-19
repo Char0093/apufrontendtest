@@ -54,8 +54,15 @@ async def upload_meeting(
     db.commit()
     db.refresh(meeting)
 
-    content = await file.read()
-    relative_path = storage.save_raw_file(meeting.id, file.filename, content)
+    import shutil
+    raw_dir = storage.base_path / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    clean_name = Path(file.filename or "recording.mp4").name
+    dest_path = raw_dir / f"{meeting.id}_{clean_name}"
+    with open(dest_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer, length=1024 * 1024)
+    
+    relative_path = f"raw/{meeting.id}_{clean_name}"
     meeting.file_path = relative_path
     db.commit()
 
