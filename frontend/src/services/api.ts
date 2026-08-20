@@ -37,6 +37,13 @@ export interface BackendMeetingListItem {
   decisions_count: number;
   action_items_count: number;
   flags_count: number;
+  source?: string | null;
+  room_id?: string | null;
+  time_range?: string | null;
+  department?: string | null;
+  host_name?: string | null;
+  rsvp_status?: string | null;
+  participant_names?: string[];
 }
 
 interface BackendDecision {
@@ -147,9 +154,24 @@ export async function listMeetings(): Promise<BackendMeetingListItem[]> {
   return apiGet('/meetings');
 }
 
+/** The backend signals "not processed yet" with a 202 (see meetings.py),
+ * which fetch() treats as a successful response (res.ok is true for any
+ * 2xx) — apiGet would happily return that 202 body ({detail: "..."}) as if
+ * it were a real BackendSummary, and mergeBackendIntoMeeting would then
+ * crash calling .map() on its nonexistent decisions/action_items/flags
+ * arrays. Checked here instead so every "not ready" meeting (scheduled,
+ * queued, still processing) resolves to null like a summary genuinely
+ * unavailable, rather than a malformed one. */
+async function apiGetOrNullIfNotReady<T>(path: string): Promise<T | null> {
+  const res = await fetch(`${API_BASE}${path}`, { headers: identityHeaders() });
+  if (res.status === 202) return null;
+  if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
+  return res.json();
+}
+
 export async function getMeetingSummary(meetingId: string): Promise<BackendSummary | null> {
   try {
-    return await apiGet(`/meeting/${meetingId}/summary`);
+    return await apiGetOrNullIfNotReady(`/meeting/${meetingId}/summary`);
   } catch {
     return null;
   }
@@ -157,7 +179,7 @@ export async function getMeetingSummary(meetingId: string): Promise<BackendSumma
 
 export async function getMeetingTranscript(meetingId: string): Promise<BackendTranscript | null> {
   try {
-    return await apiGet(`/meeting/${meetingId}/transcript`);
+    return await apiGetOrNullIfNotReady(`/meeting/${meetingId}/transcript`);
   } catch {
     return null;
   }
@@ -195,6 +217,36 @@ export async function setNodeDisplayName(
     body: JSON.stringify({ node_type: nodeType, identifier, display_name: displayName ?? null }),
   });
   if (!res.ok) throw new Error(`Rename failed: ${res.status}`);
+}
+
+/** Schedules a meeting and invites its participants server-side, so the
+ * schedule and every invitee's RSVP are visible from any device the
+ * invited/inviting employee logs into — not just the browser that created
+ * it. */
+export async function scheduleMeeting(payload: {
+  title: string;
+  project?: string;
+  date?: string;
+  time_range?: string;
+  department?: string;
+  participant_names?: string[];
+}): Promise<BackendMeetingListItem> {
+  const res = await fetch(`${API_BASE}/meetings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Schedule meeting failed: ${res.status}`);
+  return res.json();
+}
+
+export async function setMeetingRsvp(meetingId: string, status: 'accepted' | 'declined'): Promise<void> {
+  const res = await fetch(`${API_BASE}/meetings/${meetingId}/rsvp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(`RSVP failed: ${res.status}`);
 }
 
 export async function getTaskStatus(meetingId: string): Promise<BackendTaskStatus> {
@@ -271,6 +323,7 @@ const STATUS_MAP: Record<string, ProcessingStatus> = {
   completed: 'Completed',
   failed: 'Failed',
   retrying: 'Retrying',
+  scheduled: 'Scheduled',
 };
 
 export function mapBackendStatus(status: string, progress: number): ProcessingStatus {
@@ -495,9 +548,11 @@ export function mergeBackendIntoMeeting(
     title: base.title,
     project: base.project,
     dateTime: base.dateTime || item.date || new Date().toISOString(),
-    timeRange: base.timeRange,
-    department: base.department,
-    participants: summary?.participants || base.participants || [],
+    timeRange: base.timeRange || item.time_range || undefined,
+    department: base.department || item.department || undefined,
+    participants: (item.participant_names && item.participant_names.length > 0)
+      ? item.participant_names
+      : summary?.participants || base.participants || [],
     status: mapBackendStatus(item.status, item.progress),
     duration: summary?.duration || base.duration,
     summary: summary?.summary || base.summary,
@@ -509,6 +564,8 @@ export function mergeBackendIntoMeeting(
     fileSize: base.fileSize,
     completedAt: base.completedAt,
     graphData: graphData ? toGraphData(graphData) : base.graphData,
+    roomCode: base.roomCode || item.room_id || undefined,
+    hostName: base.hostName || item.host_name || undefined,
   };
 }
 
@@ -518,12 +575,16 @@ export function backendListItemToMeeting(item: BackendMeetingListItem): Meeting 
     title: item.title,
     project: item.project || 'Unassigned',
     dateTime: item.date || new Date().toISOString(),
-    participants: [],
+    timeRange: item.time_range || undefined,
+    department: item.department || undefined,
+    participants: item.participant_names || [],
     status: mapBackendStatus(item.status, item.progress),
     decisions: [],
     actionItems: [],
     transcript: [],
     contradictions: [],
+    roomCode: item.room_id || undefined,
+    hostName: item.host_name || undefined,
   };
 }
 

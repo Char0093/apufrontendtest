@@ -493,6 +493,7 @@ interface AppContextType {
   enterMeetingRoom: (roomCode: string, title?: string) => void;
   cancelScheduledMeeting: (meetingId: string) => void;
   rejectMeetingInvitation: (meetingId: string, userName?: string) => void;
+  acceptMeetingInvitation: (meetingId: string) => void;
   addLiveMeetingIntelligence: (meeting: Meeting) => void;
   pendingJoinRoomCode: string | null;
   setPendingJoinRoomCode: (code: string | null) => void;
@@ -863,10 +864,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const cancelScheduledMeeting = (meetingId: string) => {
     setMeetings(prev => prev.filter(m => m.id !== meetingId));
+    api.deleteMeeting(meetingId).catch(err => console.warn('[Corporate Brain] Could not cancel meeting on the backend:', err));
   };
 
   const rejectMeetingInvitation = (meetingId: string, userName?: string) => {
     setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, participants: (m.participants || []).filter(p => typeof p === 'string' ? p !== currentUser.name : (p as any).name !== currentUser.name) } : m));
+    api.setMeetingRsvp(meetingId, 'declined').catch(err => console.warn('[Corporate Brain] Could not decline invitation on the backend:', err));
+  };
+
+  // Joining a scheduled meeting you were invited to (rather than hosting)
+  // implicitly accepts it — the same "accepted" RSVP the host is auto-given
+  // at creation. Fire-and-forget: joining the room is the real user-facing
+  // action, this just keeps the backend's record of who's coming in sync.
+  const acceptMeetingInvitation = (meetingId: string) => {
+    api.setMeetingRsvp(meetingId, 'accepted').catch(err => console.warn('[Corporate Brain] Could not accept invitation on the backend:', err));
   };
 
   const addLiveMeetingIntelligence = (meeting: Meeting) => {
@@ -1107,7 +1118,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTimeout(poll, 1000);
   };
 
-  const addMeeting = (data: {
+  const addMeeting = async (data: {
     title: string;
     description: string;
     date: string;
@@ -1121,15 +1132,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const emp = employees.find(e => e.id === id);
       return emp ? emp.name : id;
     });
+    const timeRange = `${data.startTime} - ${data.endTime}`;
 
-    const assignedRoomCode = (data.roomCode || Math.random().toString(36).substring(2, 7).toUpperCase()).trim();
-    const newMeetingId = `mtg-${Date.now()}`;
+    // Schedule on the backend first so the meeting and every invitee's RSVP
+    // exist server-side from the start — otherwise this only ever lived in
+    // this browser's localStorage, invisible to any other device the same
+    // (or an invited) user logs into. Falls back to the old local-only
+    // record if the backend can't be reached, same graceful-degradation
+    // pattern as the rest of this app.
+    let newMeetingId = `mtg-${Date.now()}`;
+    let assignedRoomCode = (data.roomCode || Math.random().toString(36).substring(2, 7).toUpperCase()).trim();
+    try {
+      const created = await api.scheduleMeeting({
+        title: data.title,
+        project: `${data.department} Sync`,
+        date: data.date,
+        time_range: timeRange,
+        department: data.department,
+        participant_names: participantNames,
+      });
+      newMeetingId = created.id;
+      assignedRoomCode = created.room_id || assignedRoomCode;
+    } catch (err) {
+      console.warn('[Corporate Brain] Could not schedule meeting on the backend, staying local-only:', err);
+    }
+
     const newMeeting: Meeting = {
       id: newMeetingId,
       title: data.title,
       project: `${data.department} Sync`,
       dateTime: `${data.date} ${data.startTime}`,
-      timeRange: `${data.startTime} - ${data.endTime}`,
+      timeRange,
       department: data.department,
       participants: Array.from(new Set([...participantNames, currentUser.name])),
       status: 'Scheduled',
@@ -1303,6 +1336,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         enterMeetingRoom,
         cancelScheduledMeeting,
         rejectMeetingInvitation,
+        acceptMeetingInvitation,
         addLiveMeetingIntelligence,
         pendingJoinRoomCode,
         setPendingJoinRoomCode,

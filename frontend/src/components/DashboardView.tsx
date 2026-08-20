@@ -39,6 +39,7 @@ export const DashboardView: React.FC = () => {
     enterMeetingRoom,
     cancelScheduledMeeting,
     rejectMeetingInvitation,
+    acceptMeetingInvitation,
     setSelectedMeetingId,
   } = useApp();
 
@@ -283,7 +284,10 @@ export const DashboardView: React.FC = () => {
                     {/* Equal Size Toggle Buttons (No Icons) */}
                     <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800/80">
                       <button
-                        onClick={() => enterMeetingRoom(roomCode, mtg.id)}
+                        onClick={() => {
+                          if (!isHost) acceptMeetingInvitation(mtg.id);
+                          enterMeetingRoom(roomCode, mtg.id);
+                        }}
                         className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-blue-600/20 cursor-pointer text-center"
                       >
                         {isHost ? 'Start Meeting' : 'Enter Room'}
