@@ -1,124 +1,187 @@
+# 🧠 Corporate Brain
+
+### Enterprise Meeting Intelligence & Organizational Memory Graph Platform
+
+<p>
+Turns raw meetings — recorded uploads or live WebRTC calls — into a searchable,
+self-updating organizational knowledge graph. Captures not just <em>what</em>
+was decided, but <em>who</em> decided it, <em>why</em>, and whether it
+contradicts something decided weeks ago.
+</p>
+
+<p>
+  <a href="https://corporate-brain-1.vercel.app"><img alt="Vercel" src="https://img.shields.io/badge/▲%20Vercel-Live%20App-000000?style=for-the-badge&logo=vercel&logoColor=white"></a>
+  <a href="https://ninjayy-corporate-brain-backend.hf.space/docs"><img alt="Hugging Face Backend" src="https://img.shields.io/badge/🤗%20Spaces-Cloud%20AI%20Backend-FFD21E?style=for-the-badge&logoColor=black"></a>
+  <a href="https://github.com/yapyap06/corporate_brain"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-Corporate%20Brain%20Repo-181717?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://neo4j.com/product/auradb/"><img alt="Neo4j" src="https://img.shields.io/badge/Neo4j-AuraDB-008CC1?style=for-the-badge&logo=neo4j&logoColor=white"></a>
+  <a href="https://neon.tech"><img alt="Neon" src="https://img.shields.io/badge/Neon-Postgres-00E599?style=for-the-badge&logo=postgresql&logoColor=black"></a>
+</p>
+
+**Team Teh O Ais · APU Fintech Hackathon · Track 3: Intelligent Meeting Capture**
+
 ---
-title: Corporate Brain Backend
-emoji: 🧠
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
----
 
-# Corporate Brain
+## 🏗️ System Architecture & Multi-Agent AI Flow
 
-**Team Teh O Ais · Track 3: Intelligent Meeting Capture**
+```mermaid
+flowchart TB
+    subgraph CLIENT["🖥️ Client — React 18 + TypeScript + Vite + Tailwind"]
+        FE[Dashboard · Meeting Intelligence · Memory Graph<br/>Live Meeting Room · Ask Coco · Notifications / DMs]
+    end
 
-Turns raw meeting recordings into a searchable organizational knowledge graph —
-capturing not just *what* was decided, but *why*.
+    subgraph RT["🔴 Real-Time Layer"]
+        LK[LiveKit WebRTC<br/>Live Meeting Rooms]
+        WB[Collaborative Whiteboard<br/>Excalidraw over LiveKit data channel]
+    end
 
-Stack: FastAPI · Celery · Redis · SQLite (metadata) · Neo4j (knowledge graph) ·
-Deepgram · Gemini · React + Vite + Tailwind · react-force-graph
+    subgraph API["⚡ FastAPI Backend — Hugging Face Spaces (Docker)"]
+        MEET[Meetings & Invites API]
+        LIVEAPI[Live Meeting API]
+        GRAPHAPI[Graph API]
+        COCOAPI[Ask Coco RAG API]
+        SOCIAL[Notifications · DMs · Dashboard API]
+    end
 
-This repo is built incrementally against
-[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — see that file for
-the full phase/task breakdown, team allocation, and the critical MVP chain.
-**Status: Phases 0–5 are implemented and the Phase 6 frontend is integrated.**
-The default launcher runs a complete deterministic demo path with no Deepgram,
-Gemini, Agnes, Groq, or other external API usage.
+    subgraph AGENTS["🤖 Multi-Agent AI Pipeline"]
+        ASR[Deepgram Nova-2<br/>Speech Diarization]
+        VIS[Gemini 2.5 Flash Vision<br/>Nameplate / Speaker OCR]
+        LLM[Gemini 2.5 Flash<br/>Summary · Decisions · Action Items]
+        EMB[Gemini Embeddings<br/>Contradiction Detection]
+        RAG[Groq LPU + Gemini 2.5 Flash<br/>Ask Coco Synthesis]
+    end
 
-## Folder structure
+    subgraph DATA["💾 Persistence Layer"]
+        PG[(Neon Postgres<br/>Meetings · Invites · Notifications<br/>DMs · Coco History · Transcripts/Summaries)]
+        NEO[(Neo4j AuraDB<br/>Person · Meeting · Decision<br/>ActionItem · Project graph)]
+        CHROMA[(ChromaDB<br/>Decision Vector Store)]
+    end
 
+    FE -->|REST + 45s polling| API
+    FE <-->|WebRTC audio/video| LK
+    LK --> WB -->|auto-save PDF on leave| LIVEAPI
+
+    MEET --> ASR --> VIS --> LLM --> EMB
+    LLM --> NEO
+    LLM --> PG
+    EMB --> CHROMA
+
+    COCOAPI --> RAG
+    RAG --> NEO
+    RAG --> PG
+    RAG --> CHROMA
+
+    GRAPHAPI <--> NEO
+    SOCIAL <--> PG
+    LIVEAPI --> PG
 ```
-.
+
+**Person-rename propagation** (Memory Graph → everywhere): renaming a `Person`
+node in the graph cascades into every stored meeting's decision speakers,
+transcript speaker labels, and action-item assignees, so the Dashboard's
+*"My Action Tasks"* keeps matching the renamed employee — no orphaned records.
+
+---
+
+## ✨ Key Features & Enhancements
+
+### 1. 🧠 Meeting Intelligence Engine
+- Upload a recording (`.mp4/.mov/.wav/.mp3`) **or** run a live WebRTC session — both feed the same AI pipeline.
+- Deepgram Nova-2 diarization → Gemini Vision nameplate OCR → Gemini 2.5 Flash structured extraction (executive summary, decisions, action items with assignee/deadline/priority).
+- Embedding-based **contradiction engine** flags when a new decision conflicts with one made in a past meeting.
+
+### 2. 🕸️ Organizational Memory Graph
+- Interactive Neo4j-backed graph of `Person → Meeting → Decision → ActionItem → Project` relationships, with drag-focus, dark mode, and inline rename.
+- Renaming a `Person` node **automatically syncs** into every meeting's decision/transcript/action-item records and the Dashboard, in one save.
+
+### 3. 🔴 Live Meeting Rooms + Synced Whiteboard
+- LiveKit-powered video rooms with real-time transcription and live decision-contradiction suggestions.
+- Collaborative Excalidraw whiteboard, synced across participants over the LiveKit data channel, **auto-saved as a PDF** when the room empties — surfaced as a dedicated *Whiteboard* tab in Meeting Intelligence (live meetings only, not shown for uploaded meetings).
+
+### 4. 💬 Ask Coco — RAG Copilot
+- Semantic search across the entire organizational knowledge base (summaries, decisions, transcripts) via ChromaDB.
+- Groq LPU for ultra-fast synthesis, with Gemini 2.5 Flash for deeper answers — persistent per-user chat history.
+
+### 5. 🔔 Notifications, Invites & Direct Messages
+- Real meeting invitations with RSVP (accept/decline), in-app notifications, and 1:1 direct messaging — all server-persisted, not local-only.
+
+### 6. 🔄 Full Cross-Device Sync
+- Every piece of state — scheduled meetings, notifications, DMs, Ask Coco history, meeting summaries/transcripts, the personal dashboard — lives in **Neon Postgres**, durable across backend redeploys.
+- A 45-second visibility-aware polling loop keeps every logged-in device and tab current without a manual reload.
+
+### 7. 📊 Personal Dashboard
+- Auto-aggregated *"My Action Tasks"* and contradiction flags per employee, computed live from the graph + relational store.
+
+---
+
+## 🌍 Sustainable Development Goals Alignment
+
+| SDG | How Corporate Brain contributes |
+| :--- | :--- |
+| **SDG 8** — Decent Work & Economic Growth | Cuts time lost to unrecorded decisions and repeated discussions; auto-generated action items with clear owners and deadlines improve workplace accountability and productivity. |
+| **SDG 9** — Industry, Innovation & Infrastructure | Applies a multi-agent AI pipeline (ASR, vision OCR, LLM extraction, vector search) to modernize organizational knowledge infrastructure on resilient, serverless cloud services. |
+| **SDG 16** — Peace, Justice & Strong Institutions | The contradiction-detection engine and immutable decision graph create an auditable trail of *who decided what and why*, strengthening transparency and institutional accountability. |
+| **SDG 12** — Responsible Consumption & Production | Replaces paper meeting minutes and ad-hoc notes with a fully digital, queryable record — reducing physical documentation waste. |
+
+---
+
+## 📂 Project Structure
+
+```text
+APU-Fintech-Hackathon/
 ├── backend/
-│   ├── app/
-│   │   ├── main.py          # FastAPI app entrypoint
-│   │   ├── api/               # Route handlers (health.py, more per phase)
-│   │   ├── core/               # config.py, logger.py, middleware.py, exceptions.py, celery_app.py
-│   │   ├── database/            # DB session/engine setup, migrations
-│   │   ├── graph/                 # Neo4jService (Phase 4)
-│   │   ├── models/                 # SQLAlchemy ORM models
-│   │   ├── schemas/                  # Pydantic request/response schemas
-│   │   ├── services/                   # Business logic (storage, ASR, Gemini, ...)
-│   │   └── tasks/                        # Celery task definitions
-│   ├── storage/                              # raw/audio/transcripts/summaries/exports — gitignored
-│   ├── tests/
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env.example
+│   └── app/
+│       ├── main.py                 # FastAPI entrypoint, router + model registration, employee seeding
+│       ├── api/                    # meetings, live_meeting, graph, coco_history, notifications, messages, dashboard, query
+│       ├── core/                   # config.py (Settings), auth.py (X-User-Name identity)
+│       ├── database/                # SQLAlchemy engine/session
+│       ├── graph/                    # graph_builder.py — Neo4j Cypher, set_display_name, rename cascade
+│       ├── models/                    # Employee, Meeting, MeetingInvite, Notification, DirectMessage, CocoChat, MeetingContent
+│       ├── schemas/                    # Pydantic request/response schemas
+│       └── services/                    # asr, vision, gemini, embedding, askcoco, dashboard, storage services
 ├── frontend/
-│   ├── src/
-│   │   ├── components/ pages/ services/ hooks/ types/
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   └── Dockerfile
-├── docs/
-│   └── IMPLEMENTATION_PLAN.md
-├── docker-compose.yml
-├── .env.example              # secrets for `docker compose up` (separate from backend/.env.example)
+│   └── src/
+│       ├── components/              # MeetingRoomView, MeetingDetailView, KnowledgeGraphView, CollaborativeWhiteboard,
+│       │                            # CocoChatView, DashboardView, DirectMessagingView, ...
+│       ├── context/AppContext.tsx   # Global state, backend sync, cross-device polling loop
+│       ├── services/api.ts          # Typed API client + backend adapter
+│       └── types/                   # Shared TypeScript interfaces
+├── docs/                            # IMPLEMENTATION_PLAN.md, DEMO_SCRIPT.md, LIVEKIT_MEETING.md
+├── docker-compose.yml                # redis · neo4j · fastapi-backend · celery-worker · frontend-dev
+├── Dockerfile                        # Production image used by the Hugging Face Space
 └── Makefile
 ```
 
-## Running locally
+---
 
-The backend exposes meeting ingestion, demo processing, transcript and summary
-endpoints, Neo4j graph data, deterministic Ask Coco Cypher templates, and the
-personal dashboard endpoint. The frontend consumes these APIs and retains a
-local fallback when the backend is unavailable.
+## 🌐 Live URLs & Deployment Architecture
 
-For the safest first run, use `start.bat` and choose `D` for demo mode. The
-launcher also supports `R` for real processing, but that mode uses the keys in
-the integrated `backend/.env`; it does not read the standalone
-`MEETINGS/MEETINGS/.env`.
+| Environment | URL | Details |
+| :--- | :--- | :--- |
+| **Frontend (Vercel)** | [corporate-brain-1.vercel.app](https://corporate-brain-1.vercel.app) | React + Vite SPA, auto-deployed on every push to `main` |
+| **Backend (Hugging Face Spaces)** | [ninjayy-corporate-brain-backend.hf.space](https://ninjayy-corporate-brain-backend.hf.space) | Dockerized FastAPI, API docs at `/docs` |
+| **Relational Data (Neon)** | Neon Postgres | Meetings, invites, notifications, DMs, Coco history, transcripts/summaries — persists across backend redeploys |
+| **Graph Database (Neo4j Aura)** | Neo4j AuraDB | Organizational knowledge graph |
+| **GitHub Repository** | [github.com/yapyap06/corporate_brain](https://github.com/yapyap06/corporate_brain) | Source code |
 
-### Backend
+---
 
-Run everything from **`backend/`** — `app` resolves as a package because
-that's the working directory (this matches how `backend/Dockerfile` runs it
-too, so local dev and the container behave the same way):
+## ⚡ Local Setup Guide
+
+### 1. Backend
 
 ```bash
 cd backend
 python -m venv ../.venv
-../.venv/Scripts/Activate.ps1   # Windows PowerShell; use ../.venv/bin/activate on Mac/Linux
+../.venv/Scripts/Activate.ps1   # Windows PowerShell; ../.venv/bin/activate on Mac/Linux
 pip install -r requirements.txt
-cp .env.example .env            # configure NEO4J_PASSWORD for the graph
+cp .env.example .env            # configure NEO4J_PASSWORD; AI keys optional in DEMO_MODE=true
 uvicorn app.main:app --reload
 ```
 
-Config is centralized in `app/core/config.py` (Pydantic Settings). External
-AI keys are optional in demo mode; Neo4j still needs its local password.
-Never commit your real `.env`; only `.env.example` is tracked.
+Visit `http://127.0.0.1:8000/health` (expects `{"status": "ok"}`) and
+`http://127.0.0.1:8000/docs` for interactive API docs.
 
-Then visit `http://127.0.0.1:8000/health` — should return `{"status": "ok"}`.
-Interactive docs at `http://127.0.0.1:8000/docs`.
-
-CORS is restricted to the Vite dev origins (`localhost:5173` /
-`127.0.0.1:5173`) — not wildcarded. Any exception the app doesn't handle
-itself returns a clean `{"detail": "Internal server error"}` (500) instead
-of leaking a traceback to the client; the real traceback goes to
-`backend/logs/error.log`. Every request is logged to `backend/logs/app.log`
-with method, path, status code, and duration.
-
-Run the test suite with `pytest` (from `backend/`, or `make test` from the
-repo root):
-
-```bash
-cd backend
-pytest
-```
-
-To run the Celery worker locally against a Dockerized Redis
-(`docker compose up -d redis`), without the rest of the stack:
-
-```bash
-cd backend
-celery -A app.core.celery_app worker --loglevel=info
-```
-
-`app/tasks/meeting_tasks.py` registers `process_meeting_task`, which runs the
-canned demo intelligence path when `DEMO_MODE=true` and the real media path
-only when demo mode is deliberately disabled.
-
-### Frontend
+### 2. Frontend
 
 ```bash
 cd frontend
@@ -126,47 +189,72 @@ npm install
 npm run dev
 ```
 
-Then visit the URL Vite prints (default `http://localhost:5173`).
+Visit the URL Vite prints (default `http://localhost:5173`).
 
-### Docker
+### 3. Full stack via Docker Compose
 
 ```bash
-cp .env.example .env   # repo root — configure NEO4J_PASSWORD
+cp .env.example .env   # repo root — configure NEO4J_PASSWORD and optional AI keys
 docker compose up --build
 ```
 
-This is a **separate `.env`, at the repo root** — not `backend/.env`. Compose
-uses this one to substitute `${NEO4J_PASSWORD}` and optional external keys
-into `docker-compose.yml` (for `NEO4J_AUTH` and the two Python services);
-`backend/.env` is only read when you run the backend directly, outside
-Docker. If you use both workflows, keep them in sync.
+Brings up `redis`, `neo4j` (Browser at `:7474`), `fastapi-backend` (`:8000`),
+`celery-worker`, and `frontend-dev` (`:5173`) on a shared network.
 
-Brings up all 5 services on a shared network: `redis`, `neo4j`,
-`fastapi-backend` (`:8000`), `celery-worker` (same image, runs
-`celery -A app.core.celery_app worker` instead of uvicorn), and
-`frontend-dev` (`:5173`). Neo4j Browser at `:7474`. API and worker share the
-`backend-data` volume for SQLite metadata and generated meeting files.
+---
 
-`docker compose down -v` to stop and remove the Neo4j volume — do this if
-you ever change `NEO4J_PASSWORD`, since the volume bakes in whatever
-password Neo4j was first created with and won't accept a different one on
-restart.
+## 💻 Technology Stack
 
-## Makefile
+### Frontend
+| Technology | Role |
+| :--- | :--- |
+| React 18 + TypeScript | Component-based UI, type-safe state |
+| Vite | Dev server & production bundler |
+| Tailwind CSS | Styling |
+| `react-force-graph-2d` | Interactive 2D Memory Graph explorer |
+| `@excalidraw/excalidraw` | Real-time collaborative whiteboard |
+| `@livekit/components-react`, `livekit-client` | WebRTC live meeting rooms |
+| `jspdf` | Client-side whiteboard-to-PDF export |
+| Firebase | Legacy/alternate real-time chat prototype |
 
-A `Makefile` is included for Mac/Linux/WSL/Git-Bash-with-make users. On a
-plain Windows shell without `make` installed, run the equivalent commands
-shown above directly (or `Get-Content Makefile` to see the underlying
-commands for each target).
+### Backend
+| Technology | Role |
+| :--- | :--- |
+| FastAPI + Uvicorn | Async REST API framework, ASGI server |
+| SQLAlchemy + psycopg2 | ORM over Neon Postgres (relational persistence) |
+| Neo4j Python Driver | Organizational knowledge graph queries |
+| ChromaDB | Vector store for semantic search & contradiction detection |
+| Celery + Redis | Background task orchestration for the ingestion pipeline |
+| OpenCV | Video keyframe extraction for vision OCR |
+| LiveKit Server API | Room token issuance, webhook handling |
 
-## Development notes
+### AI & Cloud Services
+| Service | Provider | Purpose |
+| :--- | :--- | :--- |
+| Deepgram Nova-2 | Deepgram | Multi-speaker diarized speech-to-text |
+| Gemini 2.5 Flash (Vision + LLM) | Google | Nameplate OCR, executive summaries, decisions, action items |
+| Gemini Embeddings | Google | Vector embeddings for organizational contradiction detection |
+| Groq LPU | Groq | Ultra-low-latency Ask Coco answer synthesis |
+| Neo4j AuraDB | Neo4j | Managed cloud graph database |
+| Neon | Neon | Serverless Postgres, durable relational storage |
+| LiveKit Cloud | LiveKit | WebRTC SFU for live meeting rooms |
 
-- No secrets are committed. All configuration is centralized via
-  `backend/app/core/config.py` (Pydantic Settings) — see
-  `backend/.env.example` for every available field. External AI keys are
-  intentionally blank in the demo configuration.
-- `backend/app/core/logger.py` provides `get_logger(name, worker=False)`,
-  writing to `backend/logs/app.log` (default) or `backend/logs/worker.log`
-  (Celery-side code), with everything at `ERROR` level or above also
-  mirrored to `backend/logs/error.log`. All three are rotating (5MB × 3
-  backups) and gitignored.
+---
+
+## 🔧 Technical Specifications & System Compatibility
+
+| Component | Specification | Integration |
+| :--- | :--- | :--- |
+| Frontend App | React 18 / TypeScript / Vite SPA | Deployed on Vercel, auto-builds from `main` |
+| Backend API | Python 3.11 · FastAPI · Uvicorn | Dockerized, hosted on Hugging Face Spaces |
+| Relational DB | Neon Postgres (serverless) | Meetings, invites, notifications, DMs, chat history, transcripts/summaries |
+| Graph DB | Neo4j AuraDB (cloud) | People, meetings, decisions, action items, projects |
+| Vector Store | ChromaDB | Semantic search, contradiction detection |
+| Real-Time Video | LiveKit Cloud (WebRTC SFU) | Live meeting rooms, screen share |
+| Collaborative Whiteboard | Excalidraw + LiveKit data channel | Synced drawing, auto-saved per room as PDF |
+| Auth | Header-based identity (`X-User-Name`) | Case-insensitive match against seeded `Employee` table |
+| Cross-Device Sync | 45s visibility-aware polling | Meetings, notifications, DMs, dashboard |
+
+---
+
+*Corporate Brain — Built with FastAPI, React, Neo4j, Neon, Deepgram, Gemini, Groq, and LiveKit.*
