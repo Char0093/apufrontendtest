@@ -377,11 +377,13 @@ export function buildGlobalMemoryGraph(meetingsList: Meeting[]): GraphData {
       }
     });
 
-    meeting.contradictions?.forEach((contra) => {
-      if (contra.decisionAId && contra.decisionBId) {
+    meeting.contradictions?.forEach((contra: any) => {
+      const src = contra.decisionAId || (contra.meetingA ? `meeting:${contra.meetingA}` : undefined);
+      const tgt = contra.decisionBId || (contra.meetingB ? `meeting:${contra.meetingB}` : undefined);
+      if (src && tgt) {
         links.push({
-          source: `decision:${contra.decisionAId}`,
-          target: `decision:${contra.decisionBId}`,
+          source: src.startsWith('meeting:') ? src : `decision:${src}`,
+          target: tgt.startsWith('meeting:') ? tgt : `decision:${tgt}`,
           label: 'CONTRADICTS',
           isContradiction: true,
           meetingId: meeting.id,
