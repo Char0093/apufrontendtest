@@ -337,6 +337,68 @@ export function toGraphData(g: BackendGraphData): GraphData {
 /** Build a useful local graph while a backend graph is still being created or
  * when the frontend is running on its bundled demo meetings. This is only a
  * view fallback; Neo4j remains the source of truth for processed meetings. */
+export function buildGlobalMemoryGraph(meetingsList: Meeting[]): GraphData {
+  const nodes: GraphData['nodes'] = [];
+  const links: GraphData['links'] = [];
+  const nodeMap = new Set<string>();
+
+  const addNode = (node: GraphData['nodes'][number]) => {
+    if (!nodeMap.has(node.id)) {
+      nodeMap.add(node.id);
+      nodes.push(node);
+    }
+  };
+
+  meetingsList.forEach((meeting) => {
+    const meetingId = `meeting:${meeting.id}`;
+    addNode({ id: meetingId, name: meeting.title, type: 'Meeting', meetingId: meeting.id });
+
+    meeting.participants.forEach((name) => {
+      if (!name) return;
+      const personId = `person:${name}`;
+      addNode({ id: personId, name, type: 'Person', meetingId: meeting.id });
+      links.push({ source: personId, target: meetingId, label: 'PARTICIPATED_IN', meetingId: meeting.id });
+    });
+
+    meeting.decisions.forEach((decision) => {
+      const decisionId = `decision:${decision.id}`;
+      addNode({ id: decisionId, name: decision.title, type: 'Decision', meetingId: meeting.id });
+      links.push({ source: decisionId, target: meetingId, label: 'MADE_IN', meetingId: meeting.id });
+    });
+
+    meeting.actionItems.forEach((item) => {
+      const actionId = `action:${item.id}`;
+      addNode({ id: actionId, name: item.task, type: 'ActionItem', meetingId: meeting.id });
+      links.push({ source: actionId, target: meetingId, label: 'MADE_IN', meetingId: meeting.id });
+      if (item.assignee) {
+        const personId = `person:${item.assignee}`;
+        addNode({ id: personId, name: item.assignee, type: 'Person', meetingId: meeting.id });
+        links.push({ source: actionId, target: personId, label: 'ASSIGNED_TO', meetingId: meeting.id });
+      }
+    });
+
+    meeting.contradictions?.forEach((contra) => {
+      if (contra.decisionAId && contra.decisionBId) {
+        links.push({
+          source: `decision:${contra.decisionAId}`,
+          target: `decision:${contra.decisionBId}`,
+          label: 'CONTRADICTS',
+          isContradiction: true,
+          meetingId: meeting.id,
+        });
+      }
+    });
+
+    if (meeting.project) {
+      const projectId = `project:${meeting.project}`;
+      addNode({ id: projectId, name: meeting.project, type: 'Project', meetingId: meeting.id });
+      links.push({ source: meetingId, target: projectId, label: 'RELATES_TO', meetingId: meeting.id });
+    }
+  });
+
+  return { nodes, links };
+}
+
 export function buildLocalMeetingGraph(meeting: Meeting): GraphData {
   const nodes: GraphData['nodes'] = [];
   const links: GraphData['links'] = [];

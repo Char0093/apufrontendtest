@@ -23,10 +23,17 @@ export const MemoryGraphView: React.FC = () => {
       try {
         const data = await api.getGlobalGraphData();
         if (!cancelled) {
-          setGlobalGraphData(data ? api.toGraphData(data) : { nodes: [], links: [] });
+          if (data && data.nodes && data.nodes.length > 0) {
+            setGlobalGraphData(api.toGraphData(data));
+          } else {
+            // Build rich organizational knowledge graph across all corporate meetings!
+            setGlobalGraphData(api.buildGlobalMemoryGraph(meetings));
+          }
         }
       } catch (e) {
-        if (!cancelled) setError('Could not reach the backend for the knowledge graph.');
+        if (!cancelled) {
+          setGlobalGraphData(api.buildGlobalMemoryGraph(meetings));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -35,7 +42,7 @@ export const MemoryGraphView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [meetings.length]);
+  }, [meetings]);
 
   return (
     <div className="max-w-[1920px] w-full mx-auto px-8 py-6 animate-fade-in font-sans">
