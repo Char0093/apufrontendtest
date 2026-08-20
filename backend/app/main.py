@@ -24,6 +24,8 @@ from app.graph import graph_builder
 from app.models import meeting as _meeting_models  # noqa: F401 - registers models on Base
 from app.models import employee as _employee_models  # noqa: F401 - registers models on Base
 from app.models import notification as _notification_models  # noqa: F401 - registers models on Base
+from app.models import message as _message_models  # noqa: F401 - registers models on Base
+from app.models import coco_chat as _coco_chat_models  # noqa: F401 - registers models on Base
 from app.models.employee import Employee
 
 settings = get_settings()

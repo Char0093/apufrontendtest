@@ -314,6 +314,85 @@ export async function markAllNotificationsRead(): Promise<void> {
   if (!res.ok) throw new Error(`Mark all notifications read failed: ${res.status}`);
 }
 
+// ── Direct messages ─────────────────────────────────────────────────────
+
+export interface BackendDirectMessageItem {
+  id: string;
+  sender_name: string;
+  receiver_name: string;
+  text: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+/** Every direct message the caller sent or received, across every
+ * conversation — there's no server-side thread concept, the frontend
+ * already filters this flat list per-contact (same as it did locally). */
+export async function getDirectMessages(): Promise<BackendDirectMessageItem[]> {
+  try {
+    return await apiGet('/messages');
+  } catch {
+    return [];
+  }
+}
+
+export async function sendDirectMessageApi(receiverName: string, text: string): Promise<BackendDirectMessageItem> {
+  const res = await fetch(`${API_BASE}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
+    body: JSON.stringify({ receiver_name: receiverName, text }),
+  });
+  if (!res.ok) throw new Error(`Send message failed: ${res.status}`);
+  return res.json();
+}
+
+export async function markThreadRead(otherName: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/messages/${encodeURIComponent(otherName)}/read-all`, {
+    method: 'POST',
+    headers: identityHeaders(),
+  });
+  if (!res.ok) throw new Error(`Mark thread read failed: ${res.status}`);
+}
+
+// ── Ask Coco chat history ───────────────────────────────────────────────
+
+export interface BackendCocoMessageItem {
+  id: string;
+  role: string;
+  text: string;
+  citations: Array<{ filename: string; timestamp: string; speaker: string; excerpt?: string }>;
+  created_at: string;
+}
+
+export async function getCocoHistory(): Promise<BackendCocoMessageItem[]> {
+  try {
+    return await apiGet('/coco/history');
+  } catch {
+    return [];
+  }
+}
+
+export async function appendCocoMessage(
+  role: 'user' | 'ai',
+  text: string,
+  citations: Array<{ filename: string; timestamp: string; speaker: string; excerpt?: string }> = []
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/coco/history`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
+    body: JSON.stringify({ role, text, citations }),
+  });
+  if (!res.ok) throw new Error(`Append Coco message failed: ${res.status}`);
+}
+
+export async function clearCocoHistoryApi(): Promise<void> {
+  const res = await fetch(`${API_BASE}/coco/history`, {
+    method: 'DELETE',
+    headers: identityHeaders(),
+  });
+  if (!res.ok) throw new Error(`Clear Coco history failed: ${res.status}`);
+}
+
 export async function getTaskStatus(meetingId: string): Promise<BackendTaskStatus> {
   return apiGet(`/task/${meetingId}/status`);
 }

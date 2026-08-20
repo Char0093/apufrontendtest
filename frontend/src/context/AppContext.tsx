@@ -658,6 +658,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const [directMessages, setDirectMessages] = useState<DirectMessage[]>(initialDirectMessages);
+
+  // Load this employee's real direct messages from the backend — every
+  // message either side of a conversation sent, across every contact —
+  // so a conversation shows up on any device either party logs into,
+  // not just the one it was sent from. Re-runs whenever the active demo
+  // user changes, same as the notifications effect below.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const backendMessages = await api.getDirectMessages();
+      if (cancelled || backendMessages.length === 0) return;
+      const idFor = (name: string) => employees.find(e => e.name.toLowerCase() === name.toLowerCase())?.id || name;
+      const converted: DirectMessage[] = backendMessages.map((m) => ({
+        id: m.id,
+        senderId: idFor(m.sender_name),
+        receiverId: idFor(m.receiver_name),
+        text: m.text,
+        timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isRead: m.is_read,
+      }));
+      setDirectMessages((prev) => [...prev.filter((m) => !converted.some((c) => c.id === m.id)), ...converted]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser.name]);
   const [selectedChatUserId, setSelectedChatUserId] = useState<string>('emp-1');
   const [isCreateMeetingOpen, setIsCreateMeetingOpen] = useState<boolean>(false);
 
@@ -671,7 +698,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  // Load history whenever user logs in, switches profile, or isLoggedIn changes
+  // Load history whenever user logs in, switches profile, or isLoggedIn changes.
+  // localStorage first for an instant paint, then the backend's copy (if any)
+  // replaces it — the backend is the durable, cross-device source now that
+  // CocoChatView.tsx writes every new message through api.appendCocoMessage;
+  // an empty backend result just means this employee has no synced history
+  // yet, so the local copy (if any) is left as-is rather than being wiped.
   useEffect(() => {
     if (!isLoggedIn) return;
     const email = currentUser.email || 'guest';
@@ -681,6 +713,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       setRawCocoChatHistory([]);
     }
+
+    let cancelled = false;
+    (async () => {
+      const backendHistory = await api.getCocoHistory();
+      if (cancelled || backendHistory.length === 0) return;
+      const converted: CocoChatMessage[] = backendHistory.map((m) => ({
+        id: m.id,
+        role: m.role === 'ai' ? 'ai' : 'user',
+        text: m.text,
+        citations: m.citations,
+        ts: m.created_at,
+      }));
+      setRawCocoChatHistory(converted);
+      try {
+        localStorage.setItem(`coco_chat_${email}`, JSON.stringify(converted));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [currentUser.email, isLoggedIn]);
 
   // Handler passed to components — updates state AND persists to localStorage
@@ -701,6 +755,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setRawCocoChatHistory([]);
     const email = currentUser.email || 'guest';
     try { localStorage.removeItem(`coco_chat_${email}`); } catch { /* ignore */ }
+    api.clearCocoHistoryApi().catch(() => {});
   };
 
   // Load real meetings from the backend (docs/IMPLEMENTATION_PLAN.md Phase 5)
@@ -1245,6 +1300,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (emp) {
       setActiveDmParticipant(emp);
       setIsDmDrawerOpen(true);
+      api.markThreadRead(emp.name).catch(() => {});
     }
   };
 
@@ -1252,14 +1308,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsDmDrawerOpen(false);
   };
 
-  const sendDirectMessage = (receiverId: string, text: string) => {
+  const sendDirectMessage = async (receiverId: string, text: string) => {
     if (!text.trim()) return;
-    const recipient = employees.find(e => 
-      e.id === receiverId || 
+    const recipient = employees.find(e =>
+      e.id === receiverId ||
       e.name.toLowerCase() === receiverId.toLowerCase() ||
       e.name.toLowerCase().includes(receiverId.toLowerCase())
     );
-    
+
     const recipientId = recipient ? recipient.id : receiverId;
     const recipientName = recipient ? recipient.name : receiverId;
 
@@ -1273,20 +1329,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setDirectMessages(prev => [...prev, newMsg]);
 
-    // Dispatch In-App Notification directly to recipient
-    const dmNotification: Notification = {
-      id: `notif-dm-${Date.now()}`,
-      title: `New Direct Message`,
-      message: `${currentUser.name}: ${text.trim()}`,
-      timestamp: 'Just now',
-      read: false,
-      category: 'message',
-      type: 'DIRECT_MESSAGE',
-      senderName: currentUser.name,
-      recipientName: recipientName,
-      targetTab: 'meetings'
-    };
-    setNotifications(prevNotifs => [dmNotification, ...prevNotifs]);
+    // Sends to the backend so the recipient sees this message (and its
+    // notification) on whatever device they're actually on, not just this
+    // one — mirrors the meeting-invite sync above. The backend writes its
+    // own NotificationRecord for the recipient (see POST /messages), so the
+    // local notification below only fires as a fallback when that couldn't
+    // happen — otherwise the same device would show it twice if it later
+    // switches to viewing as the recipient.
+    let deliveredViaBackend = false;
+    try {
+      await api.sendDirectMessageApi(recipientName, text.trim());
+      deliveredViaBackend = true;
+    } catch (err) {
+      console.warn('[Corporate Brain] Could not deliver message via backend, staying local-only:', err);
+    }
+
+    if (!deliveredViaBackend) {
+      const dmNotification: Notification = {
+        id: `notif-dm-${Date.now()}`,
+        title: `New Direct Message`,
+        message: `${currentUser.name}: ${text.trim()}`,
+        timestamp: 'Just now',
+        read: false,
+        category: 'message',
+        type: 'DIRECT_MESSAGE',
+        senderName: currentUser.name,
+        recipientName: recipientName,
+        targetTab: 'meetings'
+      };
+      setNotifications(prevNotifs => [dmNotification, ...prevNotifs]);
+    }
   };
 
   const openChatWithUser = (employeeId: string) => {

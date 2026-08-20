@@ -1,4 +1,5 @@
 import { API_BASE } from '../services/api';
+import * as api from '../services/api';
 import React, { useRef, useEffect, useState } from 'react';
 import { useApp, CocoChatMessage } from '../context/AppContext';
 import {
@@ -84,16 +85,20 @@ export const CocoChatView: React.FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const addCocoMessage = (msg: { role: 'user' | 'assistant'; content: string; citations?: CocoChatMessage['citations'] }) => {
+    const role: CocoChatMessage['role'] = msg.role === 'assistant' ? 'ai' : 'user';
     setCocoChatHistory((prev) => [
       ...prev,
       {
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        role: msg.role === 'assistant' ? 'ai' : 'user',
+        role,
         text: msg.content,
         citations: msg.citations || [],
         ts: new Date().toISOString(),
       },
     ]);
+    // Persists so this conversation shows up on any device this employee
+    // logs into — fire-and-forget, the message is already shown locally.
+    api.appendCocoMessage(role, msg.content, msg.citations || []).catch(() => {});
   };
 
   useEffect(() => {
