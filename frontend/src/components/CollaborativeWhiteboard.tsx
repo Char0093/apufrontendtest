@@ -6,7 +6,7 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import { useRoomContext } from '@livekit/components-react';
 import { ConnectionState, RoomEvent } from 'livekit-client';
 import { Eraser, PenLine, RotateCcw, ChevronLeft, ChevronRight, Plus, Download, FileText } from 'lucide-react';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from 'react';
 
 type WhiteboardMessage =
   | { type: 'request-scene' }
@@ -25,11 +25,11 @@ const bytesToBase64 = (bytes: Uint8Array) => {
 
 const base64ToBytes = (value: string) => Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
 
-/** Automatically export all whiteboard pages as image / PDF assets */
-export async function downloadWhiteboardPdf(pagesMap: Record<number, readonly ExcalidrawElement[]>, roomName: string) {
+/** Core of both the manual "Export PDF" button and the auto-save-on-leave
+ * flow: renders every non-empty page to a jsPDF document. Returns null if
+ * every page was empty, so callers never ship/download an empty file. */
+async function buildWhiteboardPdf(pagesMap: Record<number, readonly ExcalidrawElement[]>): Promise<jsPDF | null> {
   const pageNumbers = Object.keys(pagesMap).map(Number).sort((a, b) => a - b);
-  const safeRoom = roomName.replace(/[^a-zA-Z0-9_-]/g, '-');
-  
   let pdf: jsPDF | null = null;
   let hasContent = false;
 
@@ -67,17 +67,33 @@ export async function downloadWhiteboardPdf(pagesMap: Record<number, readonly Ex
     }
   }
 
-  if (pdf && hasContent) {
-    const filename = `Whiteboard_${safeRoom}.pdf`;
-    pdf.save(filename);
-    return filename;
-  } else {
-    // Whiteboard is empty - do not download any empty file!
-    return null;
-  }
+  return pdf && hasContent ? pdf : null;
 }
 
-export const CollaborativeWhiteboard: React.FC<{ roomName?: string }> = ({ roomName = 'meeting-room' }) => {
+/** Whether any page has actual drawn content — used to skip auto-saving an
+ * empty whiteboard when someone leaves a meeting without ever drawing. */
+export function whiteboardHasContent(pagesMap: Record<number, readonly ExcalidrawElement[]>): boolean {
+  return Object.values(pagesMap).some((elements) => elements && elements.length > 0);
+}
+
+/** Automatically export all whiteboard pages as a downloaded PDF file. */
+export async function downloadWhiteboardPdf(pagesMap: Record<number, readonly ExcalidrawElement[]>, roomName: string) {
+  const pdf = await buildWhiteboardPdf(pagesMap);
+  if (!pdf) return null; // Whiteboard is empty - do not download any empty file!
+  const safeRoom = roomName.replace(/[^a-zA-Z0-9_-]/g, '-');
+  const filename = `Whiteboard_${safeRoom}.pdf`;
+  pdf.save(filename);
+  return filename;
+}
+
+export interface CollaborativeWhiteboardHandle {
+  /** Renders the current scene to a PDF Blob, or null if every page is
+   * empty — for the auto-save-on-leave flow (see MeetingRoomView). */
+  exportPdfBlob: () => Promise<Blob | null>;
+}
+
+export const CollaborativeWhiteboard = forwardRef<CollaborativeWhiteboardHandle, { roomName?: string }>(
+  ({ roomName = 'meeting-room' }, ref) => {
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const ignoreNextChange = useRef(false);
   const hasReceivedInitialScene = useRef(false);
@@ -93,6 +109,13 @@ export const CollaborativeWhiteboard: React.FC<{ roomName?: string }> = ({ roomN
   const [confirmClear, setConfirmClear] = useState(false);
   const [syncError, setSyncError] = useState('');
   const [syncActivity, setSyncActivity] = useState<'ready' | 'sending' | 'received'>('ready');
+
+  useImperativeHandle(ref, () => ({
+    exportPdfBlob: async () => {
+      const pdf = await buildWhiteboardPdf(pagesRef.current);
+      return pdf ? pdf.output('blob') : null;
+    },
+  }), []);
 
   const handleMessage = useCallback((data: Uint8Array<ArrayBuffer>, _participant?: unknown, _kind?: unknown, topic?: string) => {
     if (topic !== 'whiteboard') return;
@@ -354,4 +377,6 @@ export const CollaborativeWhiteboard: React.FC<{ roomName?: string }> = ({ roomN
       )}
     </section>
   );
-};
+});
+
+CollaborativeWhiteboard.displayName = 'CollaborativeWhiteboard';

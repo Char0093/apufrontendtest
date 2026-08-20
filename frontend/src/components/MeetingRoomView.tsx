@@ -24,11 +24,11 @@ import {
   Maximize2,
   Minimize2,
 } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { useLiveMeetingSession } from '../hooks/useLiveMeetingSession';
-import { askCoco, BackendCitation, analyzeTranscript } from '../services/api';
-import { CollaborativeWhiteboard } from './CollaborativeWhiteboard';
+import { askCoco, BackendCitation, analyzeTranscript, saveWhiteboard } from '../services/api';
+import { CollaborativeWhiteboard, CollaborativeWhiteboardHandle } from './CollaborativeWhiteboard';
 import { LiveSuggestionBanner } from './LiveSuggestionBanner';
 import { LiveTranscriptPanel } from './LiveTranscriptPanel';
 import { MeetingRecorder } from './MeetingRecorder';
@@ -176,6 +176,7 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
   const [showTranscript, setShowTranscript] = useState(false);
   const [isScreenEnlarged, setIsScreenEnlarged] = useState(false);
   const liveSession = useLiveMeetingSession(roomName, token);
+  const whiteboardRef = useRef<CollaborativeWhiteboardHandle>(null);
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [localCamOn, setLocalCamOn] = useState(false);
@@ -228,17 +229,19 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
   };
 
   const handleLeaveMeeting = () => {
-    // 1. Auto export whiteboard PDF only if whiteboard was drawn on
-    let exportedPdfName: string | undefined = undefined;
-    try {
-      const exportBtn = document.querySelector('[title="Export Whiteboard PDF Pages"]') as HTMLButtonElement;
-      if (exportBtn) {
-        exportBtn.click();
-        exportedPdfName = `Whiteboard_${roomName.replace(/[^a-zA-Z0-9_-]/g, '-')}.pdf`;
-      }
-    } catch {
-      // whiteboard empty or unavailable
-    }
+    // 1. Auto-save the whiteboard to the backend, keyed by room code, only
+    // if it has actual content — fire-and-forget so leaving stays instant
+    // (see step 6 below). Keyed by room code rather than a meeting id
+    // because the real backend Meeting row for this session doesn't exist
+    // yet at this point (see live_meeting.py's 45s finalization grace
+    // period); the room code is the one identifier both this client-built
+    // summary and that eventual row already share.
+    whiteboardRef.current?.exportPdfBlob()
+      .then((blob) => {
+        if (!blob) return;
+        return saveWhiteboard(roomName, blob);
+      })
+      .catch((err) => console.warn('[Corporate Brain] Could not save whiteboard:', err));
 
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
@@ -338,7 +341,7 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
       decisions: [],
       actionItems: [],
       roomCode: roomName,
-      whiteboardPdfName: exportedPdfName,
+      source: 'live',
       transcript: finalTranscript,
       graphData: {
         nodes: initialGraphNodes,
@@ -537,7 +540,7 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
               )}
             </div>
           </section>
-          <CollaborativeWhiteboard roomName={roomName} />
+          <CollaborativeWhiteboard ref={whiteboardRef} roomName={roomName} />
           {showCoco && <CocoPanel />}
           {showTranscript && <LiveTranscriptPanel transcript={liveSession.transcript} interimLine={liveSession.interimLine} error={liveSession.captionsError || liveSession.connectionError} />}
         </div>

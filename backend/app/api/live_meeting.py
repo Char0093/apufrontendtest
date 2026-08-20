@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, File, Header, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from app.core.config import get_settings
@@ -121,6 +121,8 @@ def _create_meeting_from_session(room_name: str, started_at: datetime, segments:
             duration=duration,
             file_path=None,
             status="pending",
+            source="live",
+            room_id=room_name,
         )
         db.add(meeting)
         db.commit()
@@ -305,3 +307,27 @@ def get_transcript_so_far(room_name: str, authorization: str = Header(default=""
 
     session = _sessions.get(room_name)
     return TranscriptSoFarResponse(segments=list(session.segments) if session else [])
+
+
+@router.post("/{room_name}/whiteboard", status_code=204)
+async def save_whiteboard(room_name: str, file: UploadFile = File(...)) -> Response:
+    """Called once, when the last participant leaves the room and the
+    whiteboard had content — see CollaborativeWhiteboard's exportPdfBlob and
+    MeetingRoomView's handleLeaveMeeting. Keyed by room_name rather than a
+    meeting id since the real Meeting row for this session doesn't exist
+    yet at this point (see _create_meeting_from_session's grace period)."""
+    if not _SAFE_ROOM.match(room_name):
+        raise HTTPException(status_code=400, detail="Invalid room name")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+    storage.save_whiteboard(room_name, content)
+    return Response(status_code=204)
+
+
+@router.get("/{room_name}/whiteboard")
+def get_whiteboard(room_name: str) -> Response:
+    content = storage.get_whiteboard(room_name)
+    if content is None:
+        raise HTTPException(status_code=404, detail="No whiteboard saved for this room")
+    return Response(content=content, media_type="application/pdf")

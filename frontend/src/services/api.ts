@@ -393,6 +393,35 @@ export async function clearCocoHistoryApi(): Promise<void> {
   if (!res.ok) throw new Error(`Clear Coco history failed: ${res.status}`);
 }
 
+/** Saves the whiteboard PDF for a just-left live meeting room. Keyed by
+ * room code, not meeting id — the real backend Meeting row for a live
+ * session doesn't exist until ~45s after the last participant leaves (see
+ * backend/app/api/live_meeting.py), but the room code is already known and
+ * shared by both that eventual row (room_id) and whatever meeting record
+ * this browser is showing right now. */
+export async function saveWhiteboard(roomCode: string, pdfBlob: Blob): Promise<void> {
+  const formData = new FormData();
+  formData.append('file', pdfBlob, `whiteboard_${roomCode}.pdf`);
+  const res = await fetch(`${API_BASE}/live-meeting/${encodeURIComponent(roomCode)}/whiteboard`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) throw new Error(`Save whiteboard failed: ${res.status}`);
+}
+
+/** Null if this room never had a whiteboard saved (never drawn on, or not
+ * a live-meeting-sourced record at all). */
+export async function getWhiteboard(roomCode: string): Promise<Blob | null> {
+  try {
+    const res = await fetch(`${API_BASE}/live-meeting/${encodeURIComponent(roomCode)}/whiteboard`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Get whiteboard failed: ${res.status}`);
+    return await res.blob();
+  } catch {
+    return null;
+  }
+}
+
 export async function getTaskStatus(meetingId: string): Promise<BackendTaskStatus> {
   return apiGet(`/task/${meetingId}/status`);
 }
@@ -710,6 +739,7 @@ export function mergeBackendIntoMeeting(
     graphData: graphData ? toGraphData(graphData) : base.graphData,
     roomCode: base.roomCode || item.room_id || undefined,
     hostName: base.hostName || item.host_name || undefined,
+    source: base.source || item.source || undefined,
   };
 }
 
@@ -729,6 +759,7 @@ export function backendListItemToMeeting(item: BackendMeetingListItem): Meeting 
     contradictions: [],
     roomCode: item.room_id || undefined,
     hostName: item.host_name || undefined,
+    source: item.source || undefined,
   };
 }
 

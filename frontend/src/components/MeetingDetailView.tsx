@@ -15,11 +15,12 @@ import {
   Download,
   Trash2,
   ArrowUpRight,
+  PenLine,
 } from 'lucide-react';
 import { ActionItemsTable } from './ActionItemsTable';
 import { DecisionGraph } from './DecisionGraph';
 import { useApp } from '../context/AppContext';
-import { downloadMeetingReport, buildLocalMeetingGraph, getGraphData, toGraphData } from '../services/api';
+import { downloadMeetingReport, buildLocalMeetingGraph, getGraphData, toGraphData, getWhiteboard } from '../services/api';
 
 interface MeetingDetailViewProps {
   meeting?: Meeting | null;
@@ -43,9 +44,42 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
     meeting ||
     (meetings && meetings.length > 0 ? meetings[0] : null);
 
-  const [activeTab, setActiveTab] = useState<'decisions' | 'actionItems' | 'transcript' | 'graph'>('decisions');
+  const [activeTab, setActiveTab] = useState<'decisions' | 'actionItems' | 'transcript' | 'graph' | 'whiteboard'>('decisions');
   const [transcriptSearch, setTranscriptSearch] = useState('');
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
+
+  // Only ever set for live-meeting-sourced records (see the tab's own
+  // conditional below) — fetched once per meeting, not per tab-click, so
+  // switching to the tab doesn't flash a loading state every time.
+  const [whiteboardUrl, setWhiteboardUrl] = useState<string | null>(null);
+  const [whiteboardLoading, setWhiteboardLoading] = useState(false);
+
+  useEffect(() => {
+    if (!currentMeeting || currentMeeting.source !== 'live' || !currentMeeting.roomCode) {
+      setWhiteboardUrl(null);
+      return;
+    }
+    let cancelled = false;
+    setWhiteboardLoading(true);
+    getWhiteboard(currentMeeting.roomCode).then((blob) => {
+      if (cancelled) return;
+      setWhiteboardUrl(blob ? URL.createObjectURL(blob) : null);
+      setWhiteboardLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMeeting?.id, currentMeeting?.roomCode, currentMeeting?.source]);
+
+  // Revoke the blob URL when it's replaced or the component unmounts, so a
+  // long session switching between several live meetings' whiteboards
+  // doesn't leak object URLs.
+  useEffect(() => {
+    return () => {
+      if (whiteboardUrl) URL.revokeObjectURL(whiteboardUrl);
+    };
+  }, [whiteboardUrl]);
 
   const handleJumpToTranscript = (timestamp?: string, speaker?: string, segmentId?: string) => {
     setActiveTab('transcript');
@@ -333,6 +367,18 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
         >
           <BrainCircuit className="w-4 h-4" /> Memory Graph
         </button>
+        {currentMeeting.source === 'live' && (
+          <button
+            onClick={() => setActiveTab('whiteboard')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+              activeTab === 'whiteboard'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <PenLine className="w-4 h-4" /> Whiteboard
+          </button>
+        )}
       </div>
 
       {/* SUB-VIEW 1: DECISIONS SECTION */}
@@ -526,6 +572,44 @@ export const MeetingDetailView: React.FC<MeetingDetailViewProps> = ({
 
           <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-4 shadow-sm">
             <DecisionGraph data={meetingGraphData} currentMeetingId={currentMeeting.id} meetings={meetings} onSendDirectMessage={onSendDirectMessage} />
+          </div>
+        </div>
+      )}
+
+      {/* SUB-VIEW 5: WHITEBOARD SECTION — live meetings only */}
+      {activeTab === 'whiteboard' && currentMeeting.source === 'live' && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <PenLine className="w-5 h-5 text-blue-600 dark:text-blue-400" /> Whiteboard
+            </h3>
+            {whiteboardUrl && (
+              <a
+                href={whiteboardUrl}
+                download={`Whiteboard_${currentMeeting.roomCode || currentMeeting.id}.pdf`}
+                className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                <Download className="w-3.5 h-3.5" /> Download PDF
+              </a>
+            )}
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-4 shadow-sm">
+            {whiteboardLoading ? (
+              <div className="flex items-center justify-center h-96 text-slate-400 dark:text-slate-500 text-sm">
+                Loading whiteboard...
+              </div>
+            ) : whiteboardUrl ? (
+              <iframe
+                src={whiteboardUrl}
+                title="Meeting Whiteboard"
+                className="w-full h-[75vh] rounded-2xl border border-slate-200 dark:border-slate-800"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-96 text-slate-400 dark:text-slate-500 text-sm">
+                No whiteboard content was captured in this meeting.
+              </div>
+            )}
           </div>
         </div>
       )}

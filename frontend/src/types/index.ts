@@ -141,6 +141,7 @@ export interface Meeting {
   whiteboardPdfName?: string;
   progressPercentage?: number;
   currentStepMessage?: string;
+  source?: string;
 }
 
 export type NotificationCategory = 'meeting' | 'action_item' | 'system' | 'message' | 'contradiction' | 'ai_pipeline';

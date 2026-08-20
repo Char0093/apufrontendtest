@@ -139,7 +139,7 @@ async def upload_meeting(
         raise HTTPException(status_code=415, detail=f"Unsupported file type: {ext or '(none)'}")
 
     meeting_title = title or Path(file.filename).stem
-    meeting = Meeting(title=meeting_title, project=project, status="queued")
+    meeting = Meeting(title=meeting_title, project=project, status="queued", source="upload")
     db.add(meeting)
     db.commit()
     db.refresh(meeting)
