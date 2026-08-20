@@ -177,12 +177,51 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
   const [isScreenEnlarged, setIsScreenEnlarged] = useState(false);
   const liveSession = useLiveMeetingSession(roomName, token);
 
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [localCamOn, setLocalCamOn] = useState(false);
+  const [localMicOn, setLocalMicOn] = useState(false);
+
   const toggle = async (kind: 'microphone' | 'camera' | 'screen') => {
     try {
       setMediaError('');
-      if (kind === 'microphone') await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
-      if (kind === 'camera') await localParticipant.setCameraEnabled(!isCameraEnabled);
-      if (kind === 'screen') await localParticipant.setScreenShareEnabled(!isScreenShareEnabled);
+      if (kind === 'microphone') {
+        try {
+          await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
+        } catch {
+          // Direct browser fallback
+          if (!localMicOn) {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            setLocalMicOn(true);
+          } else {
+            setLocalMicOn(false);
+          }
+        }
+      }
+      if (kind === 'camera') {
+        try {
+          await localParticipant.setCameraEnabled(!isCameraEnabled);
+        } catch {
+          // Direct browser fallback
+          if (!localCamOn) {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            setLocalStream(stream);
+            setLocalCamOn(true);
+          } else {
+            if (localStream) {
+              localStream.getTracks().forEach(t => t.stop());
+              setLocalStream(null);
+            }
+            setLocalCamOn(false);
+          }
+        }
+      }
+      if (kind === 'screen') {
+        try {
+          await localParticipant.setScreenShareEnabled(!isScreenShareEnabled);
+        } catch {
+          setMediaError('Screen share requires LiveKit cloud SFU or active browser capture.');
+        }
+      }
     } catch (error) {
       setMediaError(error instanceof Error ? error.message : 'Permission was not granted for this device.');
     }
@@ -517,8 +556,8 @@ const RoomContent: React.FC<{ roomName: string; displayName: string; token: stri
       </div>
 
       <div className="sticky bottom-3 z-20 flex flex-wrap justify-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-lg backdrop-blur">
-        <ToggleButton label="Mic" enabled={isMicrophoneEnabled} onClick={() => void toggle('microphone')} icon={<Mic className="h-5 w-5" />} inactiveIcon={<MicOff className="h-5 w-5" />} />
-        <ToggleButton label="Camera" enabled={isCameraEnabled} onClick={() => void toggle('camera')} icon={<Camera className="h-5 w-5" />} inactiveIcon={<CameraOff className="h-5 w-5" />} />
+        <ToggleButton label="Mic" enabled={isMicrophoneEnabled || localMicOn} onClick={() => void toggle('microphone')} icon={<Mic className="h-5 w-5" />} inactiveIcon={<MicOff className="h-5 w-5" />} />
+        <ToggleButton label="Camera" enabled={isCameraEnabled || localCamOn} onClick={() => void toggle('camera')} icon={<Camera className="h-5 w-5" />} inactiveIcon={<CameraOff className="h-5 w-5" />} />
         <button
           onClick={() => setShowCoco((v) => !v)}
           className={`flex min-w-20 flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
