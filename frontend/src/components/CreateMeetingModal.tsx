@@ -12,9 +12,7 @@ import {
   Send, 
   Check,
   Sparkles,
-  Upload,
-  Search,
-  FileAudio
+  Search
 } from 'lucide-react';
 
 export const CreateMeetingModal: React.FC = () => {
@@ -59,8 +57,6 @@ export const CreateMeetingModal: React.FC = () => {
     }
   }, [isCreateMeetingOpen, organizerEmp, employees]);
 
-  // Optional Audio Upload state
-  const [audioFile, setAudioFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Click outside & Escape key handler to close participant dropdown
@@ -116,12 +112,6 @@ export const CreateMeetingModal: React.FC = () => {
     setSelectedParticipantIds(prev => prev.filter(id => id !== empId));
   };
 
-  const handleAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setAudioFile(e.target.files[0]);
-    }
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -142,7 +132,6 @@ export const CreateMeetingModal: React.FC = () => {
       // Reset state
       setTitle('');
       setDescription('');
-      setAudioFile(null);
       setParticipantSearch('');
     }, 450);
   };
@@ -413,45 +402,6 @@ export const CreateMeetingModal: React.FC = () => {
                 })}
               </div>
             )}
-          </div>
-
-          {/* Audio Recording Upload Zone (Optional - Can upload post-meeting) */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center space-x-1.5">
-                <FileAudio className="w-4 h-4 text-blue-500" />
-                <span>Audio Recording</span>
-              </label>
-              <span className="px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 text-[10px] font-bold border border-amber-200 dark:border-amber-900">
-                Optional - Can upload post-meeting
-              </span>
-            </div>
-
-            <div className="relative border-2 border-dashed border-slate-200 dark:border-slate-700/80 rounded-2xl p-4 bg-slate-50/50 dark:bg-slate-800/30 hover:border-blue-400 transition-colors text-center">
-              <input
-                type="file"
-                accept="audio/*,video/mp4,.mp4"
-                onChange={handleAudioUpload}
-                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
-              />
-              <div className="flex flex-col items-center space-y-1">
-                <Upload className="w-5 h-5 text-slate-400" />
-                {audioFile ? (
-                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400 font-mono">
-                    {audioFile.name} ({(audioFile.size / (1024 * 1024)).toFixed(1)} MB)
-                  </span>
-                ) : (
-                  <>
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Click or drag audio or video file (MP3, WAV, M4A, MP4)
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      Optional — Schedule now and upload recording anytime post-meeting.
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
           </div>
 
           {/* Modal Action Footer - Single Primary Button */}
