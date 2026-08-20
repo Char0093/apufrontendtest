@@ -96,7 +96,10 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
   }, []);
 
   const completedMeetings = useMemo(() => {
-    return (meetings || []).filter(m => m.status === 'Completed');
+    return (meetings || []).filter(m => {
+      const st = (m.status || '').toLowerCase();
+      return st === 'completed' || st === 'uploaded' || st === 'ready' || (m.decisions && m.decisions.length > 0) || !m.status;
+    });
   }, [meetings]);
 
   const [selectedMeetingId, setSelectedMeetingId] = useState<string>(
@@ -146,7 +149,18 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
       }
     }
 
-    // 2. Global Memory Graph ("ALL"): Build combined graph for ALL active completed meeting cards
+    // 2. Global Memory Graph ("ALL"): If global data was provided, use it directly!
+    if (data && data.nodes && data.nodes.length > 0) {
+      return {
+        nodes: data.nodes.map(n => ({ ...n })),
+        links: (data.links || []).map(l => ({
+          ...l,
+          source: typeof l.source === 'string' ? l.source : (l.source as any)?.id,
+          target: typeof l.target === 'string' ? l.target : (l.target as any)?.id
+        }))
+      };
+    }
+
     const activeMeetings = completedMeetings;
     const nodeMap = new Map<string, GraphNode>();
     const linkMap = new Map<string, any>();
