@@ -1,3 +1,4 @@
+import { API_BASE } from '../services/api';
 import { useLocalParticipant, useRoomContext, useTracks } from '@livekit/components-react';
 import { RoomEvent, Track } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -23,8 +24,7 @@ export type LiveMeetingSessionState = {
   dismissSuggestion: (id: string) => void;
 };
 
-const apiBaseUrl = (import.meta.env.VITE_API_URL as string | undefined)
-  ?? `${window.location.protocol}//${window.location.hostname}:8000`;
+const apiBaseUrl = API_BASE;
 const wsBaseUrl = apiBaseUrl.replace(/^http/, 'ws');
 
 const encoder = new TextEncoder();

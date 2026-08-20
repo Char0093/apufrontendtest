@@ -1,3 +1,4 @@
+import { API_BASE } from '../services/api';
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -39,12 +40,7 @@ type JoinDetails = { token: string; serverUrl: string; roomName: string; display
 // instead of incorrectly calling localhost on the guest's computer.
 // Vite can be opened on IPv6 loopback while FastAPI is bound to IPv4 during
 // local development, so route that one local-only case to the IPv4 loopback.
-const frontendHost = window.location.hostname;
-const apiHost = frontendHost === '::1' || frontendHost === '[::1]'
-  ? '127.0.0.1'
-  : frontendHost;
-const apiBaseUrl = import.meta.env.VITE_API_URL
-  ?? `${window.location.protocol}//${apiHost}:8000`;
+const apiBaseUrl = API_BASE;
 
 async function getJoinDetails(roomName: string, displayName: string): Promise<JoinDetails> {
   let response: Response;
