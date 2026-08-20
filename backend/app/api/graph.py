@@ -300,15 +300,12 @@ def get_global_graph_data(
         nodes: dict[str, dict] = {}
         links: list[dict] = []
         try:
-            summaries_dir = storage.base_path / "summaries"
-            if summaries_dir.exists():
-                for sf in summaries_dir.glob("*.json"):
-                    mid = sf.stem
-                    fg = _build_fallback_meeting_graph(mid)
-                    for n in fg.get("nodes", []):
-                        nodes[n["id"]] = n
-                    for l in fg.get("links", []):
-                        links.append(l)
+            for mid, _ in storage.list_summaries():
+                fg = _build_fallback_meeting_graph(mid)
+                for n in fg.get("nodes", []):
+                    nodes[n["id"]] = n
+                for l in fg.get("links", []):
+                    links.append(l)
         except Exception:
             pass
         return {"nodes": list(nodes.values()), "links": _drop_dangling_links(nodes, links)}

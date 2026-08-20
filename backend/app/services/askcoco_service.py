@@ -188,11 +188,8 @@ def _find_meeting(query: str) -> dict | None:
 
 
 def _meeting_summary_text(meeting_id: str) -> str | None:
-    try:
-        data = json.loads(storage.get_file(f"summaries/{meeting_id}.json"))
-        return data.get("summary") or None
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
+    data = storage.get_summary(meeting_id)
+    return data.get("summary") if data else None
 
 
 def _select_template(query: str) -> tuple[QueryBuilder, str]:
@@ -337,12 +334,8 @@ def ask(query: str, user_id: str | None = None, user_role: str | None = None) ->
     stored_meetings = []
     citations = []
     try:
-        summaries_dir = storage.base_path / "summaries"
-        if summaries_dir.exists():
-            for sf in summaries_dir.glob("*.json"):
-                mid = sf.stem
-                sum_data = storage.get_summary(mid) or {}
-                stored_meetings.append({"id": mid, **sum_data})
+        for mid, sum_data in storage.list_summaries():
+            stored_meetings.append({"id": mid, **sum_data})
     except Exception as e:
         logger.warning("Error reading stored summaries: %s", e)
 

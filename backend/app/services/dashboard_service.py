@@ -36,23 +36,19 @@ def get_dashboard(user_id: str) -> dict:
         flags = []
         upcoming_meetings = []
         try:
-            summaries_dir = storage.base_path / "summaries"
-            if summaries_dir.exists():
-                for sf in summaries_dir.glob("*.json"):
-                    mid = sf.stem
-                    sum_data = storage.get_summary(mid) or {}
-                    for a in sum_data.get("action_items", []):
-                        if user_id.lower() in str(a.get("assignee", "")).lower():
-                            action_items.append({
-                                "task": a.get("task"),
-                                "deadline": a.get("deadline", "soon"),
-                                "priority": a.get("priority", "Medium")
-                            })
-                    for f in sum_data.get("flags", []):
-                        flags.append({
-                            "message": f.get("message", "Contradiction detected"),
-                            "meeting_id": mid
+            for mid, sum_data in storage.list_summaries():
+                for a in sum_data.get("action_items", []):
+                    if user_id.lower() in str(a.get("assignee", "")).lower():
+                        action_items.append({
+                            "task": a.get("task"),
+                            "deadline": a.get("deadline", "soon"),
+                            "priority": a.get("priority", "Medium")
                         })
+                for f in sum_data.get("flags", []):
+                    flags.append({
+                        "message": f.get("message", "Contradiction detected"),
+                        "meeting_id": mid
+                    })
         except Exception:
             pass
 

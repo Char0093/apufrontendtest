@@ -224,7 +224,7 @@ def list_meetings(
         if invite_status_by_meeting.get(meeting.id) == "declined":
             continue
 
-        summary = _load_json(f"summaries/{meeting.id}.json")
+        summary = storage.get_summary(meeting.id)
         if summary is not None and meeting.status.lower() in ["processing", "queued", "preprocessing", "asr", "llm", "graph"]:
             meeting.status = "completed"
             meeting.progress = 100
@@ -262,7 +262,7 @@ def get_meeting_transcript(meeting_id: str, db: Session = Depends(get_db)) -> di
     if meeting is None:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
 
-    transcript = _load_json(f"transcripts/{meeting_id}.json")
+    transcript = storage.get_transcript(meeting_id)
     if transcript is None:
         raise HTTPException(status_code=202, detail=f"Transcript not ready yet: {meeting.status}")
     return transcript
@@ -275,7 +275,7 @@ def get_meeting_summary(meeting_id: str, db: Session = Depends(get_db)) -> dict:
     if meeting is None:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
 
-    summary = _load_json(f"summaries/{meeting_id}.json")
+    summary = storage.get_summary(meeting_id)
     if summary is None:
         raise HTTPException(status_code=202, detail=f"Summary not ready yet: {meeting.status}")
     return summary
@@ -288,7 +288,7 @@ def export_meeting_report(meeting_id: str, db: Session = Depends(get_db)) -> Res
     if meeting is None:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
 
-    summary = _load_json(f"summaries/{meeting_id}.json")
+    summary = storage.get_summary(meeting_id)
     if summary is None:
         raise HTTPException(status_code=202, detail=f"Summary not ready yet: {meeting.status}")
 
@@ -360,15 +360,6 @@ def _build_report_markdown(meeting: Meeting, summary: dict) -> str:
         lines.append("")
 
     return "\n".join(lines)
-
-
-def _load_json(relative_path: str) -> dict | None:
-    """Best-effort read of a StorageService-saved JSON file. None if the
-    meeting hasn't reached that pipeline stage yet."""
-    try:
-        return json.loads(storage.get_file(relative_path))
-    except FileNotFoundError:
-        return None
 
 
 class AnalyzeTranscriptRequest(BaseModel):
