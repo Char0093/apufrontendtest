@@ -611,7 +611,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
                         setIsEditingLabel(true);
                       }}
                       title="Rename"
-                      className="p-0.5 rounded text-slate-300 hover:text-indigo-600 dark:text-slate-600 dark:hover:text-indigo-400 opacity-0 group-hover/label:opacity-100 focus:opacity-100 transition-opacity cursor-pointer"
+                      className="p-0.5 rounded text-slate-400 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 opacity-0 group-hover/label:opacity-100 focus:opacity-100 transition-opacity cursor-pointer"
                     >
                       <Pencil className="w-3 h-3" />
                     </button>
