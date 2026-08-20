@@ -1,3 +1,4 @@
+import { API_BASE } from '../services/api';
 import React, { useRef, useEffect, useState } from 'react';
 import { useApp, CocoChatMessage } from '../context/AppContext';
 import {
