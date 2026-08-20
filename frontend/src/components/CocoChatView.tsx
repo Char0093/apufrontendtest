@@ -78,14 +78,27 @@ function getFallbackAnswer(q: string): { answer: string; citations: CocoChatMess
 // -- Component -------------------------------------------------------------
 
 export const CocoChatView: React.FC = () => {
-  const { cocoMessages, addCocoMessage, clearCocoMessages, currentUser } = useApp();
+  const { cocoChatHistory, setCocoChatHistory, clearCocoChatHistory, currentUser } = useApp();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const addCocoMessage = (msg: { role: 'user' | 'assistant'; content: string; citations?: CocoChatMessage['citations'] }) => {
+    setCocoChatHistory((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        role: msg.role === 'assistant' ? 'ai' : 'user',
+        text: msg.content,
+        citations: msg.citations || [],
+        ts: new Date().toISOString(),
+      },
+    ]);
+  };
+
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [cocoMessages, loading]);
+  }, [cocoChatHistory, loading]);
 
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -130,9 +143,9 @@ export const CocoChatView: React.FC = () => {
             </p>
           </div>
         </div>
-        {cocoMessages.length > 0 && (
+        {cocoChatHistory.length > 0 && (
           <button
-            onClick={clearCocoMessages}
+            onClick={clearCocoChatHistory}
             className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -143,7 +156,7 @@ export const CocoChatView: React.FC = () => {
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {cocoMessages.length === 0 && (
+        {cocoChatHistory.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 mb-4">
               <Sparkles className="h-8 w-8" />
@@ -173,12 +186,12 @@ export const CocoChatView: React.FC = () => {
           </div>
         )}
 
-        {cocoMessages.map((msg, i) => (
+        {cocoChatHistory.map((msg, i) => (
           <div
-            key={i}
+            key={msg.id ?? i}
             className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
-            {msg.role === 'assistant' && (
+            {msg.role === 'ai' && (
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm mt-0.5">
                 <Bot className="h-4 w-4" />
               </div>
@@ -190,7 +203,7 @@ export const CocoChatView: React.FC = () => {
                   : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-900 dark:text-slate-100 rounded-bl-none'
               }`}
             >
-              <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+              <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
 
               {/* Citations */}
               {msg.citations && msg.citations.length > 0 && (
