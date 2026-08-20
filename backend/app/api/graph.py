@@ -1,16 +1,49 @@
 import logging
 from typing import Dict, List
-from fastapi import APIRouter, HTTPException
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.core.auth import get_current_employee, require_access
 from app.core.config import get_settings
-from app.core.logger import get_logger
-from app.graph import neo4j_service
+from app.database.session import get_db
+from app.graph import graph_builder, neo4j_service
+from app.models.employee import Employee, MeetingParticipant
 from app.services.storage_service import StorageService
 
 router = APIRouter()
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 settings = get_settings()
 storage = StorageService()
+
+
+class SetNodeLabelRequest(BaseModel):
+    node_type: str
+    identifier: str
+    display_name: str | None = None
+
+
+@router.patch("/graph/node-label")
+def set_node_label(payload: SetNodeLabelRequest) -> dict:
+    """display_name=None (or omitted) clears the override, reverting to the
+    node's real name/title/text/task.
+
+    Neo4j failures are converted to an HTTPException (rather than left to
+    propagate as a raw exception) so the response still passes back through
+    CORSMiddleware — an uncaught exception is handled by Starlette's
+    outermost ServerErrorMiddleware, which sits *outside* CORSMiddleware and
+    so its response never gets CORS headers, making the browser report a
+    generic "Failed to fetch" instead of a readable error."""
+    try:
+        graph_builder.set_display_name(payload.node_type, payload.identifier, payload.display_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.warning(f"Could not save node label: {exc}")
+        raise HTTPException(status_code=503, detail="Could not reach the graph database — try again shortly.")
+    return {"ok": True}
 
 
 def _drop_dangling_links(nodes: dict[str, dict], links: list[dict]) -> list[dict]:
@@ -104,8 +137,8 @@ def get_meeting_graph_data(meeting_id: str) -> dict:
             links.append({"source": did, "target": meeting_node_id, "type": "MADE_IN"})
             if row.get("speaker"):
                 pid = f"person:{row['speaker']}"
-                if pid in nodes:
-                    links.append({"source": did, "target": pid, "type": "MADE_BY"})
+                nodes.setdefault(pid, {"id": pid, "label": row["speaker"], "type": "Person"})
+                links.append({"source": did, "target": pid, "type": "MADE_BY"})
 
         for row in neo4j_service.run_query(
             """MATCH (a:ActionItem)-[:MADE_IN]->(m:Meeting {id: $id})
@@ -118,8 +151,33 @@ def get_meeting_graph_data(meeting_id: str) -> dict:
             links.append({"source": aid, "target": meeting_node_id, "type": "MADE_IN"})
             if row.get("assignee"):
                 pid = f"person:{row['assignee']}"
-                if pid in nodes:
-                    links.append({"source": aid, "target": pid, "type": "ASSIGNED_TO"})
+                nodes.setdefault(pid, {"id": pid, "label": row["assignee"], "type": "Person"})
+                links.append({"source": aid, "target": pid, "type": "ASSIGNED_TO"})
+
+        for row in neo4j_service.run_query(
+            "MATCH (m:Meeting {id: $id})-[:RELATES_TO]->(pr:Project) RETURN pr.name AS name",
+            id=meeting_id,
+        ):
+            prid = f"project:{row['name']}"
+            nodes[prid] = {"id": prid, "label": row["name"], "type": "Project"}
+            links.append({"source": meeting_node_id, "target": prid, "type": "RELATES_TO"})
+
+        for row in neo4j_service.run_query(
+            """MATCH (d:Decision)-[:MADE_IN]->(:Meeting {id: $id})
+               MATCH (d)-[c:CONTRADICTS]->(other:Decision)
+               RETURN d.id AS from_id, other.id AS to_id, other.text AS to_text, c.message AS message""",
+            id=meeting_id,
+        ):
+            from_did = f"decision:{row['from_id']}"
+            to_did = f"decision:{row['to_id']}"
+            nodes.setdefault(to_did, {"id": to_did, "label": row["to_text"], "type": "Decision"})
+            links.append({
+                "source": from_did,
+                "target": to_did,
+                "type": "CONTRADICTS",
+                "isContradiction": True,
+                "message": row["message"],
+            })
 
         return {"nodes": list(nodes.values()), "links": _drop_dangling_links(nodes, links)}
     except Exception as e:
@@ -127,10 +185,67 @@ def get_meeting_graph_data(meeting_id: str) -> dict:
         return _build_fallback_meeting_graph(meeting_id)
 
 
+_CONTAINMENT_LINK_TYPES = {"PARTICIPATED_IN", "MADE_IN", "MADE_BY", "ASSIGNED_TO", "RELATES_TO"}
+
+
+def _resolve_target(person: str | None, caller: Employee) -> str | None:
+    """Resolve /graph's `person` param into whose meetings to scope to. None
+    means "org-wide" — only reachable by a management caller who passed no
+    `person`. Any explicit `person` (self, or anyone else if the caller is
+    management) is checked via require_access before being returned."""
+    if person is not None:
+        require_access(person, caller)
+        return person
+    return None if caller.is_management else caller.name
+
+
+def _scope_to_meetings(nodes: dict[str, dict], links: list[dict], meeting_ids: set[str]) -> tuple[dict, list]:
+    """Restrict a full graph to the given meetings and everything IN them,
+    plus one hop out on CONTRADICTS edges so the *other* side of a flagged
+    contradiction stays visible."""
+    core_meetings = {f"meeting:{mid}" for mid in meeting_ids}
+    if not core_meetings:
+        return {}, []
+
+    in_scope = set(core_meetings)
+    changed = True
+    while changed:
+        changed = False
+        for l in links:
+            if l["type"] not in _CONTAINMENT_LINK_TYPES:
+                continue
+            if l["source"] in in_scope and l["target"] not in in_scope:
+                in_scope.add(l["target"])
+                changed = True
+            elif l["target"] in in_scope and l["source"] not in in_scope:
+                in_scope.add(l["source"])
+                changed = True
+
+    extra: set[str] = set()
+    for l in links:
+        if l["type"] == "CONTRADICTS" and (l["source"] in in_scope or l["target"] in in_scope):
+            extra.add(l["source"])
+            extra.add(l["target"])
+    in_scope |= extra
+
+    scoped_nodes = {nid: n for nid, n in nodes.items() if nid in in_scope}
+    scoped_links = [l for l in links if l["source"] in in_scope and l["target"] in in_scope]
+    return scoped_nodes, scoped_links
+
+
 @router.get("/graph")
-def get_global_graph_data() -> dict:
+def get_global_graph_data(
+    person: str | None = None,
+    db: Session = Depends(get_db),
+    caller: Employee = Depends(get_current_employee),
+) -> dict:
+    """Whole-organization knowledge graph ("Memory Graph" page). Defaults to
+    the caller's own meetings (see _scope_to_meetings) once meeting
+    participants are tracked; a management caller passing no `person` gets
+    the unfiltered org-wide view. Pass `person` to view a specific
+    employee's slice instead (management-only, checked via _resolve_target).
+    """
     if not settings.neo4j_uri or "localhost" in settings.neo4j_uri or "127.0.0.1" in settings.neo4j_uri:
-        # Build global aggregate graph across stored summaries
         nodes: dict[str, dict] = {}
         links: list[dict] = []
         try:
@@ -151,43 +266,98 @@ def get_global_graph_data() -> dict:
         nodes: dict[str, dict] = {}
         links: list[dict] = []
 
-        for row in neo4j_service.run_query("MATCH (m:Meeting) RETURN m.id AS id, m.title AS title"):
+        for row in neo4j_service.run_query(
+            "MATCH (m:Meeting) RETURN m.id AS id, coalesce(m.display_name, m.title) AS title"
+        ):
             mid = f"meeting:{row['id']}"
             nodes[mid] = {"id": mid, "label": row["title"] or row["id"], "type": "Meeting"}
 
         for row in neo4j_service.run_query(
-            "MATCH (p:Person)-[:PARTICIPATED_IN]->(m:Meeting) RETURN p.name AS person, m.id AS meeting"
+            "MATCH (p:Person)-[:PARTICIPATED_IN]->(m:Meeting) "
+            "RETURN p.name AS name, coalesce(p.display_name, p.name) AS label, m.id AS meeting_id"
         ):
-            pid = f"person:{row['person']}"
-            mid = f"meeting:{row['meeting']}"
-            nodes[pid] = {"id": pid, "label": row["person"], "type": "Person"}
-            links.append({"source": pid, "target": mid, "type": "PARTICIPATED_IN"})
+            pid = f"person:{row['name']}"
+            nodes.setdefault(pid, {"id": pid, "label": row["label"], "type": "Person"})
+            links.append({"source": pid, "target": f"meeting:{row['meeting_id']}", "type": "PARTICIPATED_IN"})
 
         for row in neo4j_service.run_query(
             """MATCH (d:Decision)-[:MADE_IN]->(m:Meeting)
                OPTIONAL MATCH (d)-[:MADE_BY]->(p:Person)
-               RETURN d.id AS id, d.text AS text, m.id AS meeting, p.name AS speaker"""
+               RETURN d.id AS id, coalesce(d.display_name, d.text) AS text, m.id AS meeting_id,
+                      p.name AS speaker, coalesce(p.display_name, p.name) AS speaker_label"""
         ):
             did = f"decision:{row['id']}"
             nodes[did] = {"id": did, "label": row["text"], "type": "Decision"}
-            links.append({"source": did, "target": f"meeting:{row['meeting']}", "type": "MADE_IN"})
-            if row.get("speaker"):
+            links.append({"source": did, "target": f"meeting:{row['meeting_id']}", "type": "MADE_IN"})
+            if row["speaker"]:
                 pid = f"person:{row['speaker']}"
-                if pid in nodes:
-                    links.append({"source": did, "target": pid, "type": "MADE_BY"})
+                nodes.setdefault(pid, {"id": pid, "label": row["speaker_label"], "type": "Person"})
+                links.append({"source": did, "target": pid, "type": "MADE_BY"})
 
         for row in neo4j_service.run_query(
             """MATCH (a:ActionItem)-[:MADE_IN]->(m:Meeting)
                OPTIONAL MATCH (a)-[:ASSIGNED_TO]->(p:Person)
-               RETURN a.id AS id, a.task AS task, m.id AS meeting, p.name AS assignee"""
+               RETURN a.id AS id, coalesce(a.display_name, a.task) AS task, m.id AS meeting_id,
+                      p.name AS assignee, coalesce(p.display_name, p.name) AS assignee_label"""
         ):
             aid = f"action:{row['id']}"
             nodes[aid] = {"id": aid, "label": row["task"], "type": "ActionItem"}
-            links.append({"source": aid, "target": f"meeting:{row['meeting']}", "type": "MADE_IN"})
-            if row.get("assignee"):
+            links.append({"source": aid, "target": f"meeting:{row['meeting_id']}", "type": "MADE_IN"})
+            if row["assignee"]:
                 pid = f"person:{row['assignee']}"
-                if pid in nodes:
-                    links.append({"source": aid, "target": pid, "type": "ASSIGNED_TO"})
+                nodes.setdefault(pid, {"id": pid, "label": row["assignee_label"], "type": "Person"})
+                links.append({"source": aid, "target": pid, "type": "ASSIGNED_TO"})
+
+        for row in neo4j_service.run_query(
+            "MATCH (m:Meeting)-[:RELATES_TO]->(pr:Project) "
+            "RETURN m.id AS meeting_id, pr.name AS name, coalesce(pr.display_name, pr.name) AS label"
+        ):
+            prid = f"project:{row['name']}"
+            nodes.setdefault(prid, {"id": prid, "label": row["label"], "type": "Project"})
+            links.append({"source": f"meeting:{row['meeting_id']}", "target": prid, "type": "RELATES_TO"})
+
+        for row in neo4j_service.run_query(
+            "MATCH (d:Decision)-[:RELATES_TO]->(pr:Project) "
+            "RETURN d.id AS decision_id, coalesce(d.display_name, d.text) AS decision_text, "
+            "pr.name AS name, coalesce(pr.display_name, pr.name) AS label"
+        ):
+            did = f"decision:{row['decision_id']}"
+            prid = f"project:{row['name']}"
+            nodes.setdefault(did, {"id": did, "label": row["decision_text"], "type": "Decision"})
+            nodes.setdefault(prid, {"id": prid, "label": row["label"], "type": "Project"})
+            links.append({"source": did, "target": prid, "type": "RELATES_TO"})
+
+        for row in neo4j_service.run_query(
+            """MATCH (d:Decision)-[c:CONTRADICTS]->(other:Decision)
+               RETURN d.id AS from_id, coalesce(d.display_name, d.text) AS from_text,
+                      other.id AS to_id, coalesce(other.display_name, other.text) AS to_text,
+                      c.message AS message"""
+        ):
+            from_did = f"decision:{row['from_id']}"
+            to_did = f"decision:{row['to_id']}"
+            nodes.setdefault(from_did, {"id": from_did, "label": row["from_text"], "type": "Decision"})
+            nodes.setdefault(to_did, {"id": to_did, "label": row["to_text"], "type": "Decision"})
+            links.append({
+                "source": from_did,
+                "target": to_did,
+                "type": "CONTRADICTS",
+                "isContradiction": True,
+                "message": row["message"],
+            })
+
+        target = _resolve_target(person, caller)
+        if target is not None:
+            target_employee = (
+                caller if target.lower() == caller.name.lower()
+                else db.query(Employee).filter(func.lower(Employee.name) == target.lower()).first()
+            )
+            meeting_ids: set[str] = set()
+            if target_employee is not None:
+                meeting_ids = {
+                    mp.meeting_id
+                    for mp in db.query(MeetingParticipant).filter_by(employee_id=target_employee.id)
+                }
+            nodes, links = _scope_to_meetings(nodes, links, meeting_ids)
 
         return {"nodes": list(nodes.values()), "links": _drop_dangling_links(nodes, links)}
     except Exception as e:

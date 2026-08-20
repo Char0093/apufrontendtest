@@ -553,6 +553,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       /* ignore */
     }
+    // The memory-graph endpoints identify the caller via X-User-Name (see
+    // backend/app/core/auth.py) rather than trusting a body/query param.
+    api.setApiIdentity(currentUser.name);
   }, [currentUser]);
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {

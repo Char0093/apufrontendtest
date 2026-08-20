@@ -17,14 +17,18 @@ def _synthesize_with_groq(prompt: str) -> str | None:
                             {'role': 'system', 'content': 'You are Coco, an enterprise meeting-intelligence assistant. Give direct, helpful answers based on meeting records without thinking tags.'},
                             {'role': 'user', 'content': prompt}
                         ],
-                        'max_tokens': 300,
+                        'max_tokens': 1024,
                         'temperature': 0.3
                     }).encode('utf-8')
                 )
                 with urllib.request.urlopen(req, timeout=8) as resp:
                     data = json.loads(resp.read().decode())
                     raw_ans = data['choices'][0]['message']['content']
-                    # Clean thinking tags if any
+                    # If the response got truncated mid-<think> block (no
+                    # closing tag), the reasoning trace would otherwise leak
+                    # straight to the user — discard and try the next model.
+                    if '<think>' in raw_ans and '</think>' not in raw_ans:
+                        continue
                     clean_ans = re.sub(r'<think>.*?</think>', '', raw_ans, flags=re.DOTALL).strip()
                     if clean_ans:
                         return clean_ans

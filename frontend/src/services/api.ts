@@ -11,6 +11,20 @@ import type {
 const rawBase = (import.meta as any).env?.VITE_API_BASE_URL || (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 export const API_BASE = rawBase.replace(/\/+$/, '');
 
+let currentIdentity: string | null = null;
+
+/** Sets the identity sent as X-User-Name on graph requests — the backend's
+ * memory-graph endpoints look this up against their own employee directory
+ * (see backend/app/core/auth.py) rather than trusting it directly. Call this
+ * whenever the logged-in user changes (see AppContext.tsx). */
+export function setApiIdentity(name: string): void {
+  currentIdentity = name;
+}
+
+function identityHeaders(): Record<string, string> {
+  return currentIdentity ? { 'X-User-Name': currentIdentity } : {};
+}
+
 // ── Backend response shapes (docs/IMPLEMENTATION_PLAN.md Phase 5) ─────────
 
 export interface BackendMeetingListItem {
@@ -124,7 +138,7 @@ export interface BackendDashboard {
 // ── Raw fetch calls ─────────────────────────────────────────────────────
 
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, { headers: identityHeaders() });
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
   return res.json();
 }
@@ -165,6 +179,22 @@ export async function getGlobalGraphData(): Promise<BackendGraphData | null> {
   } catch {
     return null;
   }
+}
+
+/** Sets (or, with displayName=undefined, clears) a memory-graph node's
+ * display-only label override — the node's real identity (used for merging,
+ * messaging, etc.) never changes, only what's rendered. */
+export async function setNodeDisplayName(
+  nodeType: string,
+  identifier: string,
+  displayName?: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/graph/node-label`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
+    body: JSON.stringify({ node_type: nodeType, identifier, display_name: displayName ?? null }),
+  });
+  if (!res.ok) throw new Error(`Rename failed: ${res.status}`);
 }
 
 export async function getTaskStatus(meetingId: string): Promise<BackendTaskStatus> {

@@ -168,6 +168,32 @@ def seed_demo_history() -> str:
     return seed_decision_id
 
 
+_LABEL_TARGETS = {
+    "Meeting": "id",
+    "Decision": "id",
+    "ActionItem": "id",
+    "Person": "name",
+    "Project": "name",
+}
+
+
+def set_display_name(node_type: str, identifier: str, display_name: str | None) -> None:
+    """Set (or, with display_name=None, clear) a node's display-only label
+    override. `identifier` is the node's real id (Meeting/Decision/
+    ActionItem) or real name (Person/Project) — never the override itself.
+    node_type is checked against a fixed allowlist before being interpolated
+    into the Cypher label position, so this can't be used to inject an
+    arbitrary label/query."""
+    key = _LABEL_TARGETS.get(node_type)
+    if key is None:
+        raise ValueError(f"Unknown node type: {node_type}")
+    run_query(
+        f"MATCH (n:{node_type} {{{key}: $identifier}}) SET n.display_name = $display_name",
+        identifier=identifier,
+        display_name=display_name,
+    )
+
+
 def _stable_id(meeting_id: str, kind: str, text: str) -> str:
     """Deterministic id so re-processing the same meeting MERGEs instead of
     duplicating nodes."""

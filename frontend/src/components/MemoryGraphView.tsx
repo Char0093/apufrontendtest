@@ -1,12 +1,41 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { KnowledgeGraphView } from './KnowledgeGraphView';
+import { GraphData } from '../types';
+import * as api from '../services/api';
 
-/** Whole-organization "Memory Graph" page.
- * Renders the full 2D interactive force-directed organizational memory graph
- * across all meetings, decisions, action items, participants, and contradiction edges. */
+/** Whole-organization "Memory Graph" page, distinct from the per-meeting
+ * graph tab inside MeetingDetailView. Reuses KnowledgeGraphView (same
+ * force-graph rendering, same CONTRADICTS styling) but feeds it the global
+ * /graph endpoint instead of one meeting's /graph-data. */
 export const MemoryGraphView: React.FC = () => {
-  const { meetings, sendDirectMessage } = useApp();
+  const { meetings, currentUser, sendDirectMessage } = useApp();
+  const [globalGraphData, setGlobalGraphData] = useState<GraphData | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await api.getGlobalGraphData();
+        if (!cancelled) {
+          setGlobalGraphData(data ? api.toGraphData(data) : { nodes: [], links: [] });
+        }
+      } catch (e) {
+        if (!cancelled) setError('Could not reach the backend for the knowledge graph.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser.name]);
 
   return (
     <div className="max-w-[1920px] w-full mx-auto px-8 py-6 animate-fade-in font-sans">
@@ -18,13 +47,32 @@ export const MemoryGraphView: React.FC = () => {
         </p>
       </div>
 
-      <div className="w-full">
+      {loading && (
+        <div className="flex items-center justify-center h-96 text-slate-400 text-sm">
+          Loading knowledge graph...
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="flex items-center justify-center h-96 text-red-500 text-sm">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && globalGraphData && globalGraphData.nodes.length === 0 && (
+        <div className="flex items-center justify-center h-96 text-slate-400 text-sm">
+          No meetings found yet — upload and process a meeting to populate the memory graph.
+        </div>
+      )}
+
+      {!loading && !error && globalGraphData && globalGraphData.nodes.length > 0 && (
         <KnowledgeGraphView
+          data={globalGraphData}
           meetings={meetings}
           currentMeetingId="ALL"
           onSendDirectMessage={(recipientName, text) => sendDirectMessage(recipientName, text)}
         />
-      </div>
+      )}
     </div>
   );
 };
