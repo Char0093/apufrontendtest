@@ -629,19 +629,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // (see backend/app/api/meetings.py), so this is what makes an invite
   // visible on a device other than the one it was sent from. Tagging each
   // with recipientName lets the existing userNotifications filter below
-  // scope them per demo user without any extra plumbing. Re-runs whenever
-  // the active demo user changes, since notifications are per-employee.
+  // scope them per demo user without any extra plumbing. A standalone
+  // function (not just an effect body) so both the mount/user-switch
+  // effect below and the cross-device polling effect further down can
+  // call it.
+  const refreshNotificationsFromBackend = React.useCallback(async () => {
+    const backendNotifs = await api.getNotifications();
+    if (backendNotifs.length === 0) return;
+    const tagged = backendNotifs.map((n) => ({ ...n, recipientName: currentUser.name }));
+    setNotifications((prev) => [...tagged, ...prev.filter((n) => !tagged.some((t) => t.id === n.id))]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser.name]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const backendNotifs = await api.getNotifications();
-      if (cancelled || backendNotifs.length === 0) return;
-      const tagged = backendNotifs.map((n) => ({ ...n, recipientName: currentUser.name }));
-      setNotifications((prev) => [...tagged, ...prev.filter((n) => !tagged.some((t) => t.id === n.id))]);
+      if (!cancelled) await refreshNotificationsFromBackend();
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.name]);
 
   // Real-time cross-tab & session sync for meetings and notifications
@@ -663,23 +671,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Load this employee's real direct messages from the backend — every
   // message either side of a conversation sent, across every contact —
   // so a conversation shows up on any device either party logs into,
-  // not just the one it was sent from. Re-runs whenever the active demo
-  // user changes, same as the notifications effect below.
+  // not just the one it was sent from. Standalone function so both the
+  // mount/user-switch effect and the cross-device polling effect further
+  // down can call it.
+  const refreshDirectMessagesFromBackend = React.useCallback(async () => {
+    const backendMessages = await api.getDirectMessages();
+    if (backendMessages.length === 0) return;
+    const idFor = (name: string) => employees.find(e => e.name.toLowerCase() === name.toLowerCase())?.id || name;
+    const converted: DirectMessage[] = backendMessages.map((m) => ({
+      id: m.id,
+      senderId: idFor(m.sender_name),
+      receiverId: idFor(m.receiver_name),
+      text: m.text,
+      timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isRead: m.is_read,
+    }));
+    setDirectMessages((prev) => [...prev.filter((m) => !converted.some((c) => c.id === m.id)), ...converted]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employees]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const backendMessages = await api.getDirectMessages();
-      if (cancelled || backendMessages.length === 0) return;
-      const idFor = (name: string) => employees.find(e => e.name.toLowerCase() === name.toLowerCase())?.id || name;
-      const converted: DirectMessage[] = backendMessages.map((m) => ({
-        id: m.id,
-        senderId: idFor(m.sender_name),
-        receiverId: idFor(m.receiver_name),
-        text: m.text,
-        timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isRead: m.is_read,
-      }));
-      setDirectMessages((prev) => [...prev.filter((m) => !converted.some((c) => c.id === m.id)), ...converted]);
+      if (!cancelled) await refreshDirectMessagesFromBackend();
     })();
     return () => {
       cancelled = true;
@@ -832,21 +846,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const refreshPersonalDashboardFromBackend = React.useCallback(async () => {
+    try {
+      const dashboard = await api.getUserDashboard(currentUser.name);
+      setPersonalDashboard(dashboard);
+    } catch {
+      setPersonalDashboard(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser.name]);
+
   useEffect(() => {
     let cancelled = false;
-
-    api.getUserDashboard(currentUser.name)
-      .then((dashboard) => {
-        if (!cancelled) setPersonalDashboard(dashboard);
-      })
-      .catch(() => {
-        if (!cancelled) setPersonalDashboard(null);
-      });
-
+    (async () => {
+      if (!cancelled) await refreshPersonalDashboardFromBackend();
+    })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.name]);
+
+  // Cross-device polling: none of the refresh functions above ever re-run
+  // on their own after the initial mount/user-switch fetch, so a change
+  // made on a different device (or even a different tab of this one) only
+  // ever shows up here after a manual page reload. Polling every 45s is a
+  // deliberately coarse interval — this is a demo-scale app on a free-tier
+  // backend, not something that needs sub-second staleness, and infrequent
+  // requests avoid hammering a backend that's already cold-starting on a
+  // Hugging Face Space.
+  useEffect(() => {
+    const POLL_INTERVAL_MS = 45_000;
+    const interval = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      void refreshMeetingsFromBackend();
+      void refreshNotificationsFromBackend();
+      void refreshDirectMessagesFromBackend();
+      void refreshPersonalDashboardFromBackend();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [refreshMeetingsFromBackend, refreshNotificationsFromBackend, refreshDirectMessagesFromBackend, refreshPersonalDashboardFromBackend]);
 
   const unreadCount = useMemo(() => {
     return notifications.filter(n => !n.read).length;
