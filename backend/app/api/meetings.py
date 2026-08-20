@@ -14,6 +14,7 @@ from app.core.logger import get_logger
 from app.database.session import get_db
 from app.models.employee import Employee
 from app.models.meeting import Meeting, MeetingInvite, ProcessingTask
+from app.models.notification import NotificationRecord
 from app.schemas.meeting import (
     MeetingCreate,
     MeetingCreateResponse,
@@ -75,8 +76,19 @@ def create_meeting(
     db.flush()
 
     db.add(MeetingInvite(meeting_id=meeting.id, employee_id=caller.id, rsvp_status="accepted"))
+    when = f" scheduled for {payload.date}" + (f" at {payload.time_range.split(' - ')[0]}" if payload.time_range else "") if payload.date else ""
     for employee in invitees:
         db.add(MeetingInvite(meeting_id=meeting.id, employee_id=employee.id, rsvp_status="pending"))
+        db.add(NotificationRecord(
+            employee_id=employee.id,
+            title="Meeting Invitation",
+            message=f'{caller.name} invited you to "{payload.title}"{when}.',
+            category="meeting",
+            type="INVITATION",
+            meeting_id=meeting.id,
+            sender_name=caller.name,
+            target_tab="dashboard",
+        ))
 
     db.commit()
     db.refresh(meeting)

@@ -6,6 +6,8 @@ import type {
   TranscriptSegment,
   GraphData,
   ProcessingStatus,
+  Notification,
+  NotificationCategory,
 } from '../types';
 
 const rawBase = (import.meta as any).env?.VITE_API_BASE_URL || (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
@@ -247,6 +249,69 @@ export async function setMeetingRsvp(meetingId: string, status: 'accepted' | 'de
     body: JSON.stringify({ status }),
   });
   if (!res.ok) throw new Error(`RSVP failed: ${res.status}`);
+}
+
+export interface BackendNotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  category: string;
+  type?: string | null;
+  meeting_id?: string | null;
+  sender_name?: string | null;
+  target_tab?: string | null;
+  read: boolean;
+  created_at: string;
+}
+
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const diffMin = Math.round((Date.now() - then) / 60000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+/** Notifications this employee actually has server-side — currently only
+ * written when a meeting invite is created (see backend/app/api/meetings.py)
+ * — so an invitee sees it from any device they log into. */
+export async function getNotifications(): Promise<Notification[]> {
+  try {
+    const items: BackendNotificationItem[] = await apiGet('/notifications');
+    return items.map((n) => ({
+      id: n.id,
+      title: n.title,
+      message: n.message,
+      timestamp: relativeTime(n.created_at),
+      read: n.read,
+      category: n.category as NotificationCategory,
+      type: n.type as Notification['type'],
+      meetingId: n.meeting_id || undefined,
+      senderName: n.sender_name || undefined,
+      targetTab: n.target_tab as Notification['targetTab'],
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/notifications/${notificationId}/read`, {
+    method: 'PATCH',
+    headers: identityHeaders(),
+  });
+  if (!res.ok) throw new Error(`Mark notification read failed: ${res.status}`);
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  const res = await fetch(`${API_BASE}/notifications/read-all`, {
+    method: 'POST',
+    headers: identityHeaders(),
+  });
+  if (!res.ok) throw new Error(`Mark all notifications read failed: ${res.status}`);
 }
 
 export async function getTaskStatus(meetingId: string): Promise<BackendTaskStatus> {

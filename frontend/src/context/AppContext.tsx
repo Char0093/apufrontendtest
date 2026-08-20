@@ -623,6 +623,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [notifications]);
 
+  // Load this employee's real notifications from the backend — currently
+  // only ever written server-side when someone invites them to a meeting
+  // (see backend/app/api/meetings.py), so this is what makes an invite
+  // visible on a device other than the one it was sent from. Tagging each
+  // with recipientName lets the existing userNotifications filter below
+  // scope them per demo user without any extra plumbing. Re-runs whenever
+  // the active demo user changes, since notifications are per-employee.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const backendNotifs = await api.getNotifications();
+      if (cancelled || backendNotifs.length === 0) return;
+      const tagged = backendNotifs.map((n) => ({ ...n, recipientName: currentUser.name }));
+      setNotifications((prev) => [...tagged, ...prev.filter((n) => !tagged.some((t) => t.id === n.id))]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser.name]);
+
   // Real-time cross-tab & session sync for meetings and notifications
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -805,10 +825,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const markAsRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    // Silently no-ops (404) for local-only notifications that were never
+    // written server-side — only ones from api.getNotifications() exist to
+    // mark read on the backend.
+    api.markNotificationRead(id).catch(() => {});
   };
 
   const markAllAsRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    api.markAllNotificationsRead().catch(() => {});
   };
 
   // Selected meeting state with persistent storage
@@ -1142,6 +1167,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // pattern as the rest of this app.
     let newMeetingId = `mtg-${Date.now()}`;
     let assignedRoomCode = (data.roomCode || Math.random().toString(36).substring(2, 7).toUpperCase()).trim();
+    let scheduledOnBackend = false;
     try {
       const created = await api.scheduleMeeting({
         title: data.title,
@@ -1153,6 +1179,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       newMeetingId = created.id;
       assignedRoomCode = created.room_id || assignedRoomCode;
+      scheduledOnBackend = true;
     } catch (err) {
       console.warn('[Corporate Brain] Could not schedule meeting on the backend, staying local-only:', err);
     }
@@ -1178,25 +1205,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setMeetings(prev => [newMeeting, ...prev]);
 
-    const newNotifications: Notification[] = data.participantIds.map((empId, index) => {
-      const emp = employees.find(e => e.id === empId);
-      const recipientName = emp ? emp.name : 'Participant';
-      return {
-        id: `notif-invite-${Date.now()}-${index}`,
-        title: `Meeting Invitation Sent 📅`,
-        message: `${currentUser.name} invited you to "${data.title}" scheduled for ${data.date} at ${data.startTime}.`,
-        timestamp: 'Just now',
-        read: false,
-        category: 'meeting',
-        type: 'INVITATION',
-        meetingId: newMeetingId,
-        senderName: currentUser.name,
-        recipientName: recipientName,
-        targetTab: 'meetings'
-      };
-    });
+    // The backend already wrote a real notification for each invitee (see
+    // POST /meetings) when scheduling succeeded there — only fall back to a
+    // local-only one, visible solely on this device, if it didn't.
+    if (!scheduledOnBackend) {
+      const newNotifications: Notification[] = data.participantIds.map((empId, index) => {
+        const emp = employees.find(e => e.id === empId);
+        const recipientName = emp ? emp.name : 'Participant';
+        return {
+          id: `notif-invite-${Date.now()}-${index}`,
+          title: `Meeting Invitation Sent 📅`,
+          message: `${currentUser.name} invited you to "${data.title}" scheduled for ${data.date} at ${data.startTime}.`,
+          timestamp: 'Just now',
+          read: false,
+          category: 'meeting',
+          type: 'INVITATION',
+          meetingId: newMeetingId,
+          senderName: currentUser.name,
+          recipientName: recipientName,
+          targetTab: 'meetings'
+        };
+      });
 
-    setNotifications(prev => [...newNotifications, ...prev]);
+      setNotifications(prev => [...newNotifications, ...prev]);
+    }
     setIsCreateMeetingOpen(false);
   };
 

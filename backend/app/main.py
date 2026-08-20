@@ -23,6 +23,7 @@ from app.database.session import Base, SessionLocal, engine
 from app.graph import graph_builder
 from app.models import meeting as _meeting_models  # noqa: F401 - registers models on Base
 from app.models import employee as _employee_models  # noqa: F401 - registers models on Base
+from app.models import notification as _notification_models  # noqa: F401 - registers models on Base
 from app.models.employee import Employee
 
 settings = get_settings()
