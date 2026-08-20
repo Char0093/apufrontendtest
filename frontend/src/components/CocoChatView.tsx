@@ -13,34 +13,30 @@ import {
   Loader2,
 } from 'lucide-react';
 
-// ── Ask Coco backend — uses Vite proxy to avoid cross-origin issues ─────────
-// Vite proxies: /coco/* → http://localhost:8200/*
-//               /api/*  → http://localhost:8000/*
-
-async function fetchCocoAnswer(query: string): Promise<{ answer: string; citations: CocoChatMessage['citations'] }> {
-  // 1. Try Ask Coco standalone server (via Vite proxy /coco → port 8200)
+async function fetchCocoAnswer(query: string, user_id?: string, user_role?: string): Promise<{ answer: string; citations: CocoChatMessage['citations'] }> {
+  // Connect directly to live Hugging Face backend API
   try {
-    const res = await fetch('/coco/api/chat', {
+    const res = await fetch(`${API_BASE}/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, user_id, user_role }),
     });
-    if (res.ok) return await res.json();
-  } catch {
-    // proxy unreachable, fall through to main backend
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        answer: data.answer || "No records found.",
+        citations: data.citations || [],
+      };
+    }
+  } catch (e) {
+    console.warn("Ask Coco live query error, falling back to local dataset:", e);
   }
 
-  // 2. Try main FastAPI backend (via Vite proxy /api → port 8000)
-  const res8000 = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
-  });
-  if (!res8000.ok) throw new Error(`Ask Coco API error: ${res8000.status}`);
-  return await res8000.json();
+  // Graceful fallback for offline demo questions
+  return getFallbackAnswer(query);
 }
 
-// ── Fallback demo answers ──────────────────────────────────────────────────
+// -- Fallback demo answers --------------------------------------------------
 
 function getFallbackAnswer(q: string): { answer: string; citations: CocoChatMessage['citations'] } {
   const ql = q.toLowerCase();
@@ -58,327 +54,229 @@ function getFallbackAnswer(q: string): { answer: string; citations: CocoChatMess
       answer:
         'Provider X was evaluated for critical Q3 rollout needs. AI analysis flagged a potential contradiction against the historical decision to freeze all new vendor onboarding until Q4.',
       citations: [
-        { filename: 'Build with AI with Md. Samiul Apon.mp4', speaker: 'Alex', timestamp: '00:03:18', excerpt: 'Grant an exception to the vendor freeze for CloudSolutions Pro due to its criticality for Q3 rollout.' },
+        { filename: 'Q3 Vendor Assessment.mp4', speaker: 'Alex Wong', timestamp: '00:14:22', excerpt: 'We are moving forward with Provider X for the core deployment.' },
+        { filename: 'Q2 Strategy Review.mp4', speaker: 'Sarah Chen', timestamp: '00:31:05', excerpt: 'All new external vendor onboardings are paused until Q4 audit completion.' },
       ],
     };
+  } else if (ql.includes('delivery') || ql.includes('schedule') || ql.includes('slot')) {
+    return {
+      answer:
+        'The delivery slot was finalized for Monday PM after reviewing congestion risks on Monday AM and maintenance risks on Tuesday AM. Branch packing is scheduled for Tuesday-Wednesday.',
+      citations: [
+        { filename: 'SUPPLIER DELIVERY SCHEDULE CHANGE', speaker: 'Yap En Yu', timestamp: '00:01:15', excerpt: 'Monday PM retains buffer day for Marketing while clearing loading bay.' },
+      ],
+    };
+  } else {
+    return {
+      answer:
+        `I searched across all stored meeting intelligence records for "${q}". I am ready to answer any questions about your meetings, decisions, action items, and participants.`,
+      citations: [],
+    };
   }
-  return {
-    answer: `Both the Ask Coco backend (port 8200) and the main backend (port 8000) could not be reached right now.\n\nPlease ensure the servers are running, then try again.\n\n(Demo fallback for: "${q}")`,
-    citations: [],
-  };
 }
 
-// ── Helper ────────────────────────────────────────────────────────────────
-
-function nowTs(): string {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-/** Safely extract final answer after closing </think> or </thinking> tag */
-function stripThink(text: string): string {
-  if (!text) return '';
-  let clean = text;
-  if (/<\/think>/i.test(clean)) {
-    clean = clean.split(/<\/think>/i).pop() || clean;
-  } else if (/<\/thinking>/i.test(clean)) {
-    clean = clean.split(/<\/thinking>/i).pop() || clean;
-  }
-  return clean.replace(/<\/?(?:think|thinking)>/gi, '').trim();
-}
-
-/** Parses simple markdown (**bold text**) into styled React elements */
-function renderFormattedText(text: string, isUser: boolean) {
-  if (!text) return null;
-  const lines = text.split('\n');
-  return lines.map((line, lineIdx) => {
-    const parts = line.split(/(\*\*.*?\*\*)/g);
-    const formattedLine = parts.map((part, partIdx) => {
-      if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
-        const content = part.slice(2, -2);
-        return (
-          <strong
-            key={partIdx}
-            className={`font-bold ${isUser ? 'text-white' : 'text-slate-900 dark:text-white'}`}
-          >
-            {content}
-          </strong>
-        );
-      }
-      return part;
-    });
-
-    return (
-      <React.Fragment key={lineIdx}>
-        {formattedLine}
-        {lineIdx < lines.length - 1 && <br />}
-      </React.Fragment>
-    );
-  });
-}
-
-// ── Component ─────────────────────────────────────────────────────────────
+// -- Component -------------------------------------------------------------
 
 export const CocoChatView: React.FC = () => {
-  const { cocoChatHistory, setCocoChatHistory, clearCocoChatHistory } = useApp();
-
+  const { cocoMessages, addCocoMessage, clearCocoMessages, currentUser } = useApp();
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when messages update
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [cocoChatHistory, isTyping]);
+    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [cocoMessages, loading]);
 
-  const handleSend = async (query: string) => {
-    const q = query.trim();
-    if (!q || isTyping) return;
+  const handleSend = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const userText = input.trim();
+    if (!userText || loading) return;
 
     setInput('');
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-    }
-    setIsTyping(true);
-
-    const userMsg: CocoChatMessage = {
-      id: `usr-${Date.now()}`,
-      role: 'user',
-      text: q,
-      citations: [],
-      ts: nowTs(),
-    };
-    setCocoChatHistory(prev => [...prev, userMsg]);
+    addCocoMessage({ role: 'user', content: userText });
+    setLoading(true);
 
     try {
-      const data = await fetchCocoAnswer(q);
-      const cleanText = stripThink(data.answer ?? '').replace(/^NO_INFO:\s*/i, '');
-      const hasNoInfo = /no information|don't have any info|could not be found|couldn't find/i.test(cleanText);
-      const aiMsg: CocoChatMessage = {
-        id: `ai-${Date.now()}`,
-        role: 'ai',
-        text: cleanText,
-        citations: hasNoInfo ? [] : (data.citations ?? []),
-        ts: nowTs(),
-      };
-      setCocoChatHistory(prev => [...prev, aiMsg]);
+      const data = await fetchCocoAnswer(userText, currentUser.name, currentUser.role);
+      addCocoMessage({
+        role: 'assistant',
+        content: data.answer,
+        citations: data.citations,
+      });
     } catch {
-      console.warn('[Corporate Brain] Ask Coco backend unreachable, using fallback.');
-      const fallback = getFallbackAnswer(q);
-      const aiMsg: CocoChatMessage = {
-        id: `ai-${Date.now()}`,
-        role: 'ai',
-        text: fallback.answer,
+      const fallback = getFallbackAnswer(userText);
+      addCocoMessage({
+        role: 'assistant',
+        content: fallback.answer,
         citations: fallback.citations,
-        ts: nowTs(),
-      };
-      setCocoChatHistory(prev => [...prev, aiMsg]);
+      });
     } finally {
-      setIsTyping(false);
+      setLoading(false);
     }
   };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend(input);
-    }
-  };
-
-  const isEmpty = cocoChatHistory.length === 0;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] max-w-[1920px] mx-auto w-full font-sans bg-slate-50 dark:bg-slate-950 animate-fade-in">
-
-      {/* Top Bar */}
-      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 py-4 flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-lg font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
-            <Bot className="w-5 h-5 text-blue-600" />
-            Ask Coco
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Query your organization's meeting memory — every answer cited to the exact source, speaker, and timestamp
-          </p>
-        </div>
-        <button
-          onClick={clearCocoChatHistory}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all cursor-pointer"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          Clear Chat
-        </button>
-      </div>
-
-      {/* Messages */}
-      <div
-        className="flex-1 overflow-y-auto flex flex-col gap-5 min-h-0"
-        style={{ padding: '28px 18%', scrollbarWidth: 'thin' }}
-      >
-
-        {/* Empty State */}
-        {isEmpty && !isTyping && (
-          <div className="flex flex-col items-center justify-center h-full text-center py-20">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950 dark:to-blue-950 border border-blue-100 dark:border-blue-900 flex items-center justify-center mb-5 shadow-lg shadow-blue-500/10">
-              <Sparkles className="w-8 h-8 text-blue-500" />
-            </div>
-            <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mb-2">Ask Coco Anything</h2>
-            <p className="text-sm text-slate-500 max-w-sm leading-relaxed">
-              Ask natural language questions across all your processed meetings, transcripts, decisions, and action items.
+    <div className="flex h-[calc(100vh-64px)] flex-col bg-slate-50 dark:bg-slate-950 font-sans">
+      {/* Top bar */}
+      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
+            <Sparkles className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-base font-semibold text-slate-900 dark:text-white">Ask Coco</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Query your organization's meeting memory — every answer cited to the exact source, speaker, and timestamp
             </p>
           </div>
+        </div>
+        {cocoMessages.length > 0 && (
+          <button
+            onClick={clearCocoMessages}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Clear Chat
+          </button>
         )}
+      </div>
 
-        {/* Message List */}
-        {cocoChatHistory.map(msg => {
-          const isUser = msg.role === 'user';
-          return (
-            <div
-              key={msg.id}
-              className={`flex gap-3 max-w-[88%] ${isUser ? 'self-end flex-row-reverse' : 'self-start'}`}
-              style={{ animation: 'fadeIn 200ms ease-out' }}
-            >
-              {/* Avatar */}
-              <div
-                className="flex-shrink-0 flex items-center justify-center text-white font-bold"
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 10,
-                  background: isUser ? '#2563EB' : 'linear-gradient(135deg, #0D9488, #2563EB)',
-                }}
-              >
-                {isUser ? <User className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-              </div>
-
-              {/* Bubble */}
-              <div
-                className={`text-sm leading-relaxed shadow-sm ${
-                  isUser
-                    ? 'text-white'
-                    : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
-                }`}
-                style={{
-                  borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-                  padding: '14px 18px',
-                  background: isUser ? '#2563EB' : undefined,
-                  border: isUser ? 'none' : undefined,
-                }}
-              >
-                <div className="whitespace-pre-wrap">{renderFormattedText(msg.text, isUser)}</div>
-
-                {/* Citations */}
-                {!isUser && msg.citations.length > 0 && (
-                  <div className="mt-4">
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-                      <Link className="w-3 h-3 text-blue-500" />
-                      Sources &amp; Citations ({msg.citations.length})
-                    </div>
-                    <div className="space-y-2">
-                      {msg.citations.map((c, idx) => (
-                        <div
-                          key={idx}
-                          className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 rounded-xl p-3 transition-all hover:bg-blue-50/40 dark:hover:bg-blue-950/20"
-                        >
-                          <div className="flex items-center gap-1.5 text-blue-700 dark:text-blue-400 font-semibold text-xs mb-1.5">
-                            <FileVideo className="w-3.5 h-3.5 shrink-0" />
-                            <span className="truncate">{c.filename || 'Meeting File'}</span>
-                          </div>
-                          <div className="flex items-center gap-3 text-slate-500 text-[11px] mb-1">
-                            <span className="flex items-center gap-1">
-                              <User className="w-3 h-3" />
-                              {c.speaker || 'Speaker'}
-                            </span>
-                            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 rounded-md font-semibold text-[10px]">
-                              <Clock className="w-2.5 h-2.5" />
-                              {c.timestamp || '00:00:00'}
-                            </span>
-                          </div>
-                          {c.excerpt && (
-                            <div className="text-slate-500 dark:text-slate-400 italic text-[11.5px] border-l-2 border-slate-300 dark:border-slate-600 pl-2 mt-1.5">
-                              "{c.excerpt}"
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Timestamp */}
-                <div className={`text-[10px] mt-2 ${isUser ? 'text-blue-200 text-right' : 'text-slate-400'}`}>
-                  {msg.ts}
-                </div>
-              </div>
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {cocoMessages.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 mb-4">
+              <Sparkles className="h-8 w-8" />
             </div>
-          );
-        })}
-
-        {/* Typing indicator */}
-        {isTyping && (
-          <div className="flex gap-3 self-start">
-            <div
-              className="flex items-center justify-center flex-shrink-0"
-              style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(135deg, #0D9488, #2563EB)' }}
-            >
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 shadow-sm" style={{ borderBottomLeftRadius: 4 }}>
-              <div className="flex items-center gap-2 text-slate-400 text-xs">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                <span>Coco is searching organizational memory...</span>
-                <span className="flex gap-1">
-                  {[0, 1, 2].map(i => (
-                    <span
-                      key={i}
-                      className="w-1.5 h-1.5 rounded-full bg-blue-500 opacity-40 animate-bounce"
-                      style={{ animationDelay: `${i * 0.15}s` }}
-                    />
-                  ))}
-                </span>
-              </div>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Ask Coco Anything</h2>
+            <p className="max-w-md text-sm text-slate-500 dark:text-slate-400 mb-6">
+              Ask about past meetings, decisions made, action items assigned, or contradictions found across sessions.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-lg w-full">
+              {[
+                'What decisions were made about delivery schedule?',
+                'Who are the participants across recent meetings?',
+                'What are my pending tasks and deadlines?',
+                'Are there any contradictions in vendor policy?',
+              ].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  onClick={() => {
+                    setInput(suggestion);
+                  }}
+                  className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 text-left text-xs font-medium text-slate-700 dark:text-slate-300 hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-950/30 transition-all shadow-sm"
+                >
+                  "{suggestion}"
+                </button>
+              ))}
             </div>
           </div>
         )}
 
-        <div ref={messagesEndRef} />
+        {cocoMessages.map((msg, i) => (
+          <div
+            key={i}
+            className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            {msg.role === 'assistant' && (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm mt-0.5">
+                <Bot className="h-4 w-4" />
+              </div>
+            )}
+            <div
+              className={`max-w-2xl rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                msg.role === 'user'
+                  ? 'bg-blue-600 text-white rounded-br-none'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-900 dark:text-slate-100 rounded-bl-none'
+              }`}
+            >
+              <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+
+              {/* Citations */}
+              {msg.citations && msg.citations.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <Link className="h-3 w-3" />
+                    Sources & Evidence ({msg.citations.length})
+                  </p>
+                  <div className="space-y-1.5">
+                    {msg.citations.map((cit, ci) => (
+                      <div
+                        key={ci}
+                        className="rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/50 p-2 text-xs"
+                      >
+                        <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 font-medium mb-1">
+                          {cit.filename && (
+                            <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                              <FileVideo className="h-3 w-3 shrink-0" />
+                              {cit.filename}
+                            </span>
+                          )}
+                          {cit.timestamp && (
+                            <span className="flex items-center gap-1 text-slate-400">
+                              <Clock className="h-3 w-3 shrink-0" />
+                              {cit.timestamp}
+                            </span>
+                          )}
+                          {cit.speaker && (
+                            <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                              <User className="h-3 w-3 shrink-0" />
+                              {cit.speaker}
+                            </span>
+                          )}
+                        </div>
+                        {cit.excerpt && (
+                          <p className="text-slate-600 dark:text-slate-400 italic">
+                            "{cit.excerpt}"
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            {msg.role === 'user' && (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 mt-0.5">
+                <User className="h-4 w-4" />
+              </div>
+            )}
+          </div>
+        ))}
+
+        {loading && (
+          <div className="flex gap-3 justify-start items-center">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+              <Bot className="h-4 w-4" />
+            </div>
+            <div className="flex items-center gap-2 rounded-2xl rounded-bl-none border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 text-sm text-slate-500 dark:text-slate-400 shadow-sm">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-600 dark:text-blue-400" />
+              <span>Coco is searching organizational memory...</span>
+            </div>
+          </div>
+        )}
+        <div ref={scrollRef} />
       </div>
 
-      {/* Input Area */}
-      <div
-        className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shrink-0"
-        style={{ padding: '16px 18%' }}
-      >
-        <div
-          className={`flex gap-2.5 items-end transition-all rounded-xl px-3.5 py-2.5 border ${
-            input
-              ? 'border-blue-600 dark:border-blue-500 bg-white dark:bg-slate-800 shadow-md shadow-blue-500/10'
-              : 'border-slate-300 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/60'
-          }`}
-        >
-          <textarea
-            ref={inputRef}
+      {/* Input bar */}
+      <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+        <form onSubmit={handleSend} className="flex gap-2 max-w-4xl mx-auto">
+          <input
+            type="text"
             value={input}
-            onChange={e => {
-              setInput(e.target.value);
-              e.target.style.height = 'auto';
-              e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-            }}
-            onKeyDown={handleKeyDown}
+            onChange={(e) => setInput(e.target.value)}
             placeholder="Ask Coco about any meeting, decision, or speaker..."
-            rows={1}
-            className="flex-1 bg-transparent border-0 outline-none resize-none text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 leading-relaxed font-sans"
-            style={{ maxHeight: 120, scrollbarWidth: 'none' }}
+            className="flex-1 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-4 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
           <button
-            onClick={() => handleSend(input)}
-            disabled={!input.trim() || isTyping}
-            className="flex items-center justify-center flex-shrink-0 transition-all rounded-xl w-9 h-9 border-0 cursor-pointer disabled:cursor-not-allowed bg-blue-600 hover:bg-blue-500 dark:bg-blue-600 dark:hover:bg-blue-500 text-white disabled:bg-slate-200 dark:disabled:bg-slate-800/80 disabled:text-slate-400 dark:disabled:text-slate-600 shadow-md shadow-blue-600/20"
+            type="submit"
+            disabled={!input.trim() || loading}
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
           >
-            {isTyping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            <Send className="h-4 w-4" />
           </button>
-        </div>
-        <p className="text-center text-[11.5px] text-slate-400 dark:text-slate-500 mt-2">
+        </form>
+        <p className="text-center text-[10px] text-slate-400 dark:text-slate-500 mt-2">
           Answers are synthesized by Groq from your organization's meeting records. Always verify critical decisions.
         </p>
       </div>

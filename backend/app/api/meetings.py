@@ -68,7 +68,7 @@ async def upload_meeting(
 
     # Launch directly in FastAPI BackgroundTasks (immediate execution without Celery daemon)
     background_tasks.add_task(run_meeting_pipeline_direct, meeting.id)
-    logger.info(f"Meeting {meeting.id} uploaded ({len(content)} bytes), started direct background processing")
+    logger.info(f"Meeting {meeting.id} uploaded ({clean_name}), started direct background processing")
 
     return MeetingCreateResponse(meeting_id=meeting.id)
 

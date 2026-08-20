@@ -1,8 +1,5 @@
 FROM python:3.11-slim
 
-WORKDIR /app
-
-# Install FFmpeg and OpenCV system dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
@@ -10,18 +7,20 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
-# Copy all backend code
-COPY . .
+WORKDIR /home/user/app
 
-# Create storage directories
-RUN mkdir -p storage/raw storage/audio storage/transcripts storage/summaries storage/embeddings
+COPY --chown=user:user requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Expose Hugging Face Space port
+COPY --chown=user:user . .
+
+RUN mkdir -p storage/raw storage/audio storage/transcripts storage/summaries storage/embeddings logs
+
 EXPOSE 7860
 
-# Start FastAPI with Uvicorn on 7860
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]

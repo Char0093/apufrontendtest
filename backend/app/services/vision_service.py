@@ -1,3 +1,32 @@
+from typing import List, Dict, Optional, Any
+def resolve_to_full_canonical_name(name_str: str, detected_full_names: list[str]) -> str:
+    """If a single-word nickname/surname is used in dialogue (e.g. 'Kam', 'Thim', 'Yap', 'Duncan'),
+    resolve it to the exact full nameplate name from vision (e.g. 'Kam Xin Le', 'Thim Yee Song', 'Yap En Yu', 'Duncan Oh')."""
+    if not name_str:
+        return name_str
+    clean = str(name_str).strip()
+    if not detected_full_names:
+        return clean
+
+    # 1. Exact match (case-insensitive)
+    for fn in detected_full_names:
+        if clean.lower() == fn.lower():
+            return fn
+
+    # 2. Check if clean is a word/token inside a full multi-word name (e.g. 'Kam' -> 'Kam Xin Le', 'Thim' -> 'Thim Yee Song')
+    for fn in detected_full_names:
+        tokens = [t.lower() for t in fn.split()]
+        if clean.lower() in tokens:
+            return fn
+
+    # 3. Check prefix/start match (e.g. 'Yap' in 'Yap En Yu')
+    for fn in detected_full_names:
+        if fn.lower().startswith(clean.lower()) or clean.lower().startswith(fn.lower()):
+            return fn
+
+    return clean
+
+
 import base64
 import json
 import logging
@@ -13,7 +42,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-def extract_names_from_video(video_path: str) -> Dict[float, List[str]]:
+def extract_names_from_video(video_path: str) -> dict[float, list[str]]:
     """Ultra-fast Gemini Vision sampling: captures 2 strategic key frames (25% and 65%),
     and asks Gemini 2.5 Flash (Primary) to read ALL participant nameplates in under 2 seconds.
     Falls back to Agnes AI only if Gemini is unavailable."""
@@ -22,7 +51,7 @@ def extract_names_from_video(video_path: str) -> Dict[float, List[str]]:
 
     import cv2
 
-    name_timestamps: Dict[float, List[str]] = {}
+    name_timestamps: dict[float, list[str]] = {}
     frames_dir = Path(settings.storage_path) / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
@@ -42,16 +71,13 @@ def extract_names_from_video(video_path: str) -> Dict[float, List[str]]:
 
         # Sample 6 distributed frames across the meeting to capture when different speakers open mic
         if duration_s > 10:
+            # Ultra-fast 2-frame sampling (20% and 65%) to read all participant webcam tiles in ~2 seconds
             sample_timestamps = [
-                duration_s * 0.08,
-                duration_s * 0.25,
-                duration_s * 0.42,
-                duration_s * 0.58,
-                duration_s * 0.75,
-                duration_s * 0.90,
+                duration_s * 0.20,
+                duration_s * 0.65,
             ]
         elif duration_s > 0:
-            sample_timestamps = [duration_s * 0.2, duration_s * 0.6]
+            sample_timestamps = [duration_s * 0.4]
         else:
             sample_timestamps = [0.0]
 
@@ -90,7 +116,7 @@ def extract_names_from_video(video_path: str) -> Dict[float, List[str]]:
                 if gemini_client:
                     try:
                         from google.genai import types
-                        for model_name in ["gemini-flash-latest"]:
+                        for model_name in ["gemini-2.5-flash"]:
                             for attempt in range(2):
                                 try:
                                     resp = gemini_client.models.generate_content(
@@ -160,10 +186,10 @@ def extract_names_from_video(video_path: str) -> Dict[float, List[str]]:
 
 
 def map_speakers_to_names(
-    segments: List[dict],
-    name_timestamps: Dict[float, List[str]],
-    gemini_map: Optional[Dict[str, str]] = None,
-) -> Dict[str, str]:
+    segments: list[dict],
+    name_timestamps: dict[float, list[str]],
+    gemini_map: Optional[dict[str, str]] = None,
+) -> dict[str, str]:
     """Map SPEAKER_01, SPEAKER_02... to real names, combining Gemini analysis
     with Vision-detected nameplates. Guarantees 100% of speaker IDs are replaced
     with real participant names without leaving raw 'SPEAKER_XX' labels."""
@@ -171,7 +197,7 @@ def map_speakers_to_names(
     all_names = list(dict.fromkeys(n.strip() for names in name_timestamps.values() for n in names if n.strip()))
 
     # Normalize Gemini keys (e.g. 'Speaker 1', 'SPEAKER_1', 'SPEAKER_01' -> 'SPEAKER_01')
-    normalized_map: Dict[str, str] = {}
+    normalized_map: dict[str, str] = {}
     for k, v in raw_map.items():
         if not v or "speaker" in v.lower() or "unknown" in v.lower():
             continue
@@ -192,7 +218,7 @@ def map_speakers_to_names(
             unique_speakers.append(spk)
             speaker_first_seen[spk] = seg.get("start", 0)
 
-    final_map: Dict[str, str] = {}
+    final_map: dict[str, str] = {}
     assigned_names = set()
 
     # Pass 1: Apply normalized AI / vision mappings
@@ -231,7 +257,7 @@ def map_speakers_to_names(
                 print(f"[VISION LINK] >> Assigned distinct label for '{spk}' -> 'Participant {num}'", flush=True)
 
     # Ensure variations of speaker tags (e.g. 'SPEAKER_1' and 'SPEAKER_01') are in final_map
-    expanded_map: Dict[str, str] = dict(final_map)
+    expanded_map: dict[str, str] = dict(final_map)
     for spk, name in list(final_map.items()):
         digits = re.findall(r'\d+', spk)
         if digits:

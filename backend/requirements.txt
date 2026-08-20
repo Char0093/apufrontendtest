@@ -18,3 +18,5 @@ openai>=1.0.0
 
 # Live Meeting Rooms (LiveKit)
 livekit-api>=1.0,<2.0
+
+sentence-transformers>=2.2.0

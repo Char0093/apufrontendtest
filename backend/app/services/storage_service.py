@@ -41,6 +41,24 @@ class StorageService:
         relative_path = f"raw/{meeting_id}_live.json"
         return json.loads((self.base_path / relative_path).read_text())
 
+    def get_summary(self, meeting_id: str) -> dict | None:
+        p = self.base_path / "summaries" / f"{meeting_id}.json"
+        if p.exists():
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+        return None
+
+    def get_transcript(self, meeting_id: str) -> dict | None:
+        p = self.base_path / "transcripts" / f"{meeting_id}.json"
+        if p.exists():
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+        return None
+
     def save_summary(self, meeting_id: str, data: dict) -> str:
         relative_path = f"summaries/{meeting_id}.json"
         (self.base_path / relative_path).write_text(json.dumps(data, indent=2))
@@ -65,3 +83,6 @@ class StorageService:
                     file_path.unlink()
                 except Exception:
                     pass
+
+
+storage = StorageService()

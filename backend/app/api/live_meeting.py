@@ -189,7 +189,12 @@ async def _finalize_after_grace_period(session: LiveMeetingSession) -> None:
         return
 
     meeting_id = _create_meeting_from_session(session.room_name, started_at, segments)
-    process_live_meeting_task.delay(meeting_id)
+    try:
+        import threading
+        t = threading.Thread(target=process_live_meeting_task, args=(meeting_id,), daemon=True)
+        t.start()
+    except Exception:
+        process_live_meeting_task(meeting_id)
     logger.info(f"Live meeting in room '{session.room_name}' finalized as {meeting_id} ({len(segments)} segments)")
 
 

@@ -62,7 +62,7 @@ def call_agnes_api(messages: list, model: str = "agnes-2.5-pro") -> str:
     for attempt in range(2):
         try:
             req = urllib.request.Request(url, data=data_bytes, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 res = json.loads(resp.read().decode("utf-8"))
                 return res["choices"][0]["message"]["content"]
         except Exception as e:
@@ -91,7 +91,8 @@ The following participant names were DETECTED from video nameplates/tiles by Vis
 Analyze the conversation carefully to determine each speaker's real identity:
 1. Match each SPEAKER_XX to one of the detected participant names above.
 2. If there are more speakers in the transcript than detected names, analyze how speakers greet or address each other in dialogue (e.g., "Thanks John", "Hey Sarah, what do you think?", "Good point Duncan") to infer their real names.
-3. Make sure EVERY unique SPEAKER_XX is assigned a real person's name (never leave generic 'SPEAKER_XX' or 'Unknown').
+3. Make sure EVERY unique SPEAKER_XX is assigned a real person's name (e.g. 'Yap En Yu', 'Simla', 'David Lee', 'Sarah Chen'). NEVER use generic job titles, roles, or placeholders like 'Meeting Lead', 'Marketing Rep', 'Operations Rep', 'Host', or 'Participant'.
+4. If a person's name cannot be found in the video or dialogue, infer their real name from the first name spoken or use their nameplate.
 4. The 'participants' list in your JSON output MUST include ALL people who spoke or attended the meeting.
 
 **PART 2 — EXTRACT INTELLIGENCE**
@@ -143,7 +144,7 @@ risks, and factual knowledge triples.
                 from google import genai
                 from google.genai import types
                 client = genai.Client(api_key=settings.gemini_api_key)
-                for model_name in ["gemini-flash-latest"]:
+                for model_name in ["gemini-2.5-flash"]:
                     for attempt in range(3):
                         try:
                             print(f"[GEMINI AI] >> Running intelligence extraction with {model_name} (attempt {attempt+1}/3)...", flush=True)

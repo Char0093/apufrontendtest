@@ -1,3 +1,39 @@
+import os
+def _synthesize_with_groq(prompt: str) -> str | None:
+    """Ultra-fast Groq LPU inference."""
+    groq_key = getattr(settings, 'groq_api_key', None) or os.getenv('GROQ_API_KEY')
+    if not groq_key:
+        return None
+    try:
+        import urllib.request
+        for model in ['qwen/qwen3.6-27b', 'openai/gpt-oss-120b']:
+            try:
+                req = urllib.request.Request(
+                    'https://api.groq.com/openai/v1/chat/completions',
+                    headers={'Authorization': f'Bearer {groq_key}', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'},
+                    data=json.dumps({
+                        'model': model,
+                        'messages': [
+                            {'role': 'system', 'content': 'You are Coco, an enterprise meeting-intelligence assistant. Give direct, helpful answers based on meeting records without thinking tags.'},
+                            {'role': 'user', 'content': prompt}
+                        ],
+                        'max_tokens': 300,
+                        'temperature': 0.3
+                    }).encode('utf-8')
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode())
+                    raw_ans = data['choices'][0]['message']['content']
+                    # Clean thinking tags if any
+                    clean_ans = re.sub(r'<think>.*?</think>', '', raw_ans, flags=re.DOTALL).strip()
+                    if clean_ans:
+                        return clean_ans
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning("Groq synthesis error: %s", e)
+    return None
+
 """Deterministic Ask Coco queries backed by predefined Cypher templates.
 
 The Cypher stays fixed/parameterized (never LLM-generated) for the same
@@ -257,10 +293,11 @@ what the user could ask instead (decisions, action items, contradictions, or
 participants). Keep the answer to 2-4 sentences, conversational, no
 markdown/bullet formatting.
 
-Question: {query}
+Current User: {active_user} ({user_role or "Staff"})
+User Question: {query_scoped}
 Data (kind={kind}): {results[:15]}
 """
-        response = client.models.generate_content(model="gemini-flash-latest", contents=prompt)
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         text = (response.text or "").strip()
         return text or None
     except Exception as exc:
@@ -268,48 +305,112 @@ Data (kind={kind}): {results[:15]}
         return None
 
 
-def ask(query: str) -> dict:
-    """Map a natural-language question to a safe, predefined Cypher query,
-    then synthesize a natural answer from the results."""
+def ask(query: str, user_id: str | None = None, user_role: str | None = None) -> dict:
+    """Query organizational & personalized user memory with Groq LPU + Gemini 2.5 Flash synthesis."""
+    """Query organizational intelligence via Graph RAG or Storage RAG with Gemini 2.5 Flash synthesis."""
     if not query.strip():
-        return {"answer": "Please ask a question.", "results": [], "cypher": "", "citations": []}
+        return {"answer": "Hello! I am Coco, your Corporate Brain AI. How can I help you regarding meetings, decisions, or action items?", "results": [], "cypher": "", "citations": []}
 
     lowered_query = query.lower()
-    if any(keyword in lowered_query for keyword in _SUMMARY_KEYWORDS):
-        note = "MATCH (m:Meeting) RETURN m.id, m.title  -- then read its stored summary (not graph data)"
-        meeting = _find_meeting(query)
-        if not meeting:
-            return {
-                "answer": "I couldn't tell which meeting you mean — try including its title, e.g. \"summarize the Vendor Contract Review meeting\".",
-                "results": [], "cypher": note, "citations": [],
-            }
-        summary_text = _meeting_summary_text(meeting["id"])
-        if not summary_text:
-            return {
-                "answer": f'"{meeting["title"]}" doesn\'t have a stored summary yet.',
-                "results": [meeting], "cypher": note, "citations": [],
-            }
-        row = {"meeting": meeting["title"], "summary": summary_text}
-        answer = _synthesize_with_gemini(query, "summary", [row]) or summary_text
-        return {"answer": answer, "results": [row], "cypher": note, "citations": _citations_for("summary", [row])}
 
-    builder, kind = _select_template(query)
-    cypher, params = builder(query)
-    try:
-        results = run_query(cypher, **params)
-    except Exception:
+    # Personalized Memory Scoping: Map "my tasks", "my decisions", "what should I do" to the active user
+    active_user = user_id or "Current User"
+    if user_id and ("my" in lowered_query or " i " in f" {lowered_query} " or "me" in lowered_query):
+        query_scoped = re.sub(r'\b(my|i|me)\b', user_id, query, flags=re.IGNORECASE)
+    else:
+        query_scoped = query
+
+    # Greetings & chit-chat
+    if lowered_query in ("hi", "hello", "hey", "who are you", "help", "what can you do"):
         return {
-            "answer": "The meeting graph is unavailable. Start Neo4j and try again.",
+            "answer": "Hello! I am Coco, your Corporate Brain AI assistant. I can query meeting transcripts, summarize decisions, track action items, and flag cross-meeting contradictions. What would you like to know?",
             "results": [],
-            "cypher": cypher,
-            "citations": [],
+            "cypher": "",
+            "citations": []
         }
 
-    answer = _synthesize_with_gemini(query, kind, results) or _format_answer_fallback(kind, results)
+    # 1. Gather all stored meeting knowledge from storage
+    stored_meetings = []
+    citations = []
+    try:
+        summaries_dir = storage.base_path / "summaries"
+        if summaries_dir.exists():
+            for sf in summaries_dir.glob("*.json"):
+                mid = sf.stem
+                sum_data = storage.get_summary(mid) or {}
+                stored_meetings.append({"id": mid, **sum_data})
+    except Exception as e:
+        logger.warning("Error reading stored summaries: %s", e)
+
+    # 2. Extract relevant items
+    results = []
+    builder, kind = _select_template(query)
+    
+    # Try Neo4j if available
+    try:
+        if settings.neo4j_uri and "localhost" not in settings.neo4j_uri and "127.0.0.1" not in settings.neo4j_uri:
+            cypher, params = builder(query)
+            results = run_query(cypher, **params)
+    except Exception:
+        pass
+
+    # If Neo4j yielded nothing or was offline, extract from stored summaries
+    if not results and stored_meetings:
+        if kind == "action_items":
+            for m in stored_meetings:
+                for a in m.get("action_items", []):
+                    results.append({"task": a.get("task"), "assignee": a.get("assignee"), "deadline": a.get("deadline", "soon"), "meeting": m.get("title", m.get("id"))})
+        elif kind == "decisions":
+            for m in stored_meetings:
+                for d in m.get("decisions", []):
+                    results.append({"decision": d.get("decision") or d.get("text") or d.get("title"), "speaker": d.get("speaker"), "meeting": m.get("title", m.get("id"))})
+        elif kind == "contradictions":
+            for m in stored_meetings:
+                for f in m.get("flags", []):
+                    results.append({"decision": f.get("decision_a"), "conflicts_with": f.get("decision_b"), "message": f.get("message"), "meeting": m.get("title", m.get("id"))})
+        else:
+            for m in stored_meetings:
+                results.append({"id": m.get("id"), "meeting": m.get("title", m.get("id")), "participants": m.get("participants", [])})
+
+    # 3. Generate citations
+    citations = _citations_for(kind, results)
+
+    # 4. Synthesize with Groq LPU or Gemini 2.5 Flash
+    answer = None
+    ai_prompt = f"""Answer the user's question accurately and helpfully using the corporate meeting context provided below.
+Current User: {active_user} ({user_role or "Staff"})
+User Question: {query_scoped}
+Meeting Context: {json.dumps(stored_meetings[:5], default=str)}
+"""
+    # Try Groq first for ultra-fast response
+    answer = _synthesize_with_groq(ai_prompt)
+
+    # Fallback to Gemini 2.5 Flash
+    if not answer and settings.gemini_api_key:
+        try:
+            from google import genai
+            client = genai.Client(api_key=settings.gemini_api_key)
+            prompt = f"""You are Coco, an enterprise AI decision & meeting intelligence assistant.
+Answer the user's question accurately and helpfully using the corporate meeting context provided below.
+If there are specific decisions or action items, mention them clearly.
+If the query is a general question, answer conversationally.
+
+Current User: {active_user} ({user_role or "Staff"})
+User Question: {query_scoped}
+Meeting Knowledge Context: {json.dumps(stored_meetings[:5], default=str)}
+"""
+            resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+            if resp and resp.text:
+                answer = resp.text.strip()
+        except Exception as e:
+            logger.warning("Gemini Coco synthesis fallback: %s", e)
+
+    if not answer:
+        answer = _format_answer_fallback(kind, results)
 
     return {
         "answer": answer,
         "results": results,
-        "cypher": cypher,
-        "citations": _citations_for(kind, results),
+        "cypher": "Storage RAG Graph Query",
+        "citations": citations
     }

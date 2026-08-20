@@ -63,6 +63,20 @@ def _analyze_transcript(
     for seg in segments:
         seg["speaker"] = speaker_map.get(seg["speaker"], speaker_map.get(seg.get("speaker_raw", ""), seg["speaker"]))
 
+    # Apply PyTorch + SentenceTransformers sentence logic matching
+    try:
+        from app.services import sentence_nlp_service
+        aligned_decisions = sentence_nlp_service.align_decisions_with_transcript_quotes(
+            analysis_dict.get("decisions", []), segments
+        )
+        grouped_action_items = sentence_nlp_service.group_action_items_by_semantic_topic(
+            analysis_dict.get("action_items", [])
+        )
+    except Exception as nlp_err:
+        logger.warning(f"Sentence NLP layer notice: {nlp_err}")
+        aligned_decisions = analysis_dict.get("decisions", [])
+        grouped_action_items = analysis_dict.get("action_items", [])
+
     last_sec = max((s.get("start", 0) for s in segments), default=0)
     h, m, sec = int(last_sec // 3600), int((last_sec % 3600) // 60), int(last_sec % 60)
 
@@ -85,7 +99,7 @@ def _analyze_transcript(
             Decision(
                 **{
                     **d,
-                    "speaker": speaker_map.get(d.get("speaker", ""), d.get("speaker", "")),
+                    "speaker": vision_service.resolve_to_full_canonical_name(speaker_map.get(d.get("speaker", ""), d.get("speaker", "")), all_detected_names),
                     "evidence": (
                         d.get("evidence") and (
                             lambda ev: [
@@ -97,16 +111,16 @@ def _analyze_transcript(
                     ) or d.get("evidence", "")
                 }
             )
-            for d in analysis_dict.get("decisions", [])
+            for d in aligned_decisions
         ],
         action_items=[
             ActionItem(
                 **{
                     **a,
-                    "assignee": speaker_map.get(a.get("assignee", ""), a.get("assignee", ""))
+                    "assignee": vision_service.resolve_to_full_canonical_name(speaker_map.get(a.get("assignee", ""), a.get("assignee", "")), all_detected_names)
                 }
             )
-            for a in analysis_dict.get("action_items", [])
+            for a in grouped_action_items
         ],
         flags=[],
         risks=analysis_dict.get("risks", []),
