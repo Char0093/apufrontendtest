@@ -89,7 +89,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
   currentMeetingId,
   onSendDirectMessage
 }) => {
-  const { sendDirectMessage } = useApp();
+  const { sendDirectMessage, refreshMeetings } = useApp();
   const { isDark } = useTheme();
   const fgRef = useRef<any>();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -153,6 +153,14 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
       await api.setNodeDisplayName(selectedNode.type, realIdentifierFor(selectedNode), trimmed);
       setLabelOverrides(prev => ({ ...prev, [selectedNode.id]: trimmed }));
       setIsEditingLabel(false);
+      // A Person rename also patches every affected meeting's stored
+      // speaker/assignee text on the backend (see graph.py's
+      // set_node_label) — re-fetch so Decisions/Action Items/Transcript
+      // and Dashboard's "My Action Tasks" reflect it immediately instead
+      // of only after a hard reload.
+      if (selectedNode.type === 'Person') {
+        void refreshMeetings();
+      }
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Rename failed. Please try again.');
     } finally {

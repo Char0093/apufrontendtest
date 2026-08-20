@@ -43,7 +43,58 @@ def set_node_label(payload: SetNodeLabelRequest) -> dict:
     except Exception as exc:
         logger.warning(f"Could not save node label: {exc}")
         raise HTTPException(status_code=503, detail="Could not reach the graph database — try again shortly.")
+
+    # A Person rename should show up everywhere that name is quoted — a
+    # decision's speaker, an action item's assignee, a transcript line —
+    # not just the graph node. Without this, e.g. Dashboard's "My Action
+    # Tasks" (which matches assignee text against the logged-in employee's
+    # real name) would never surface a task still filed under an old
+    # nickname/typo/AI-transcribed spelling. Best-effort: a failure here
+    # doesn't roll back the graph rename that already succeeded above.
+    if payload.node_type == "Person" and payload.display_name:
+        try:
+            for meeting_id in graph_builder.meetings_referencing_person(payload.identifier):
+                _rename_person_in_storage(meeting_id, payload.identifier, payload.display_name)
+        except Exception as exc:
+            logger.warning(f"Could not propagate person rename into stored meeting records: {exc}")
     return {"ok": True}
+
+
+def _rename_person_in_storage(meeting_id: str, old_name: str, new_name: str) -> None:
+    """Case-insensitive exact-match rename of old_name -> new_name across
+    one meeting's stored summary (participants, decision speakers, action
+    item assignees) and transcript (per-line speakers)."""
+    old_lower = old_name.strip().lower()
+
+    summary = storage.get_summary(meeting_id)
+    if summary:
+        changed = False
+        for i, p in enumerate(summary.get("participants") or []):
+            if isinstance(p, str) and p.strip().lower() == old_lower:
+                summary["participants"][i] = new_name
+                changed = True
+        for d in summary.get("decisions") or []:
+            if isinstance(d.get("speaker"), str) and d["speaker"].strip().lower() == old_lower:
+                d["speaker"] = new_name
+                changed = True
+        for a in summary.get("action_items") or []:
+            if isinstance(a.get("assignee"), str) and a["assignee"].strip().lower() == old_lower:
+                a["assignee"] = new_name
+                changed = True
+        if changed:
+            storage.save_summary(meeting_id, summary)
+
+    transcript = storage.get_transcript(meeting_id)
+    if transcript:
+        lines = transcript.get("transcript")
+        changed = False
+        if isinstance(lines, list):
+            for line in lines:
+                if isinstance(line, dict) and isinstance(line.get("speaker"), str) and line["speaker"].strip().lower() == old_lower:
+                    line["speaker"] = new_name
+                    changed = True
+        if changed:
+            storage.save_transcript(meeting_id, transcript)
 
 
 def _drop_dangling_links(nodes: dict[str, dict], links: list[dict]) -> list[dict]:

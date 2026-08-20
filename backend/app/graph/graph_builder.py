@@ -194,6 +194,25 @@ def set_display_name(node_type: str, identifier: str, display_name: str | None) 
     )
 
 
+def meetings_referencing_person(name: str) -> set[str]:
+    """Every meeting id where this Person participated, made a decision, or
+    was assigned an action item — used to propagate a Person rename beyond
+    the graph node itself into the stored per-meeting transcript/summary
+    records that Decisions/Action Items/Transcript actually render from
+    (see api/graph.py's set_node_label)."""
+    rows = run_query(
+        """MATCH (p:Person {name: $name})
+           OPTIONAL MATCH (p)-[:PARTICIPATED_IN]->(m1:Meeting)
+           OPTIONAL MATCH (p)<-[:MADE_BY]-(:Decision)-[:MADE_IN]->(m2:Meeting)
+           OPTIONAL MATCH (p)<-[:ASSIGNED_TO]-(:ActionItem)-[:MADE_IN]->(m3:Meeting)
+           RETURN collect(DISTINCT m1.id) + collect(DISTINCT m2.id) + collect(DISTINCT m3.id) AS ids""",
+        name=name,
+    )
+    if not rows:
+        return set()
+    return {mid for mid in rows[0]["ids"] if mid}
+
+
 def _stable_id(meeting_id: str, kind: str, text: str) -> str:
     """Deterministic id so re-processing the same meeting MERGEs instead of
     duplicating nodes."""

@@ -498,6 +498,7 @@ interface AppContextType {
   pendingJoinRoomCode: string | null;
   setPendingJoinRoomCode: (code: string | null) => void;
   processAudioForMeeting: (meetingId: string, file: File | { name: string; size?: number }, initialMeeting?: Meeting) => void;
+  refreshMeetings: () => Promise<void>;
   addMeeting: (meetingData: {
     title: string;
     description: string;
@@ -762,60 +763,69 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // and merge them ahead of the bundled mock data. If the backend isn't
   // running (e.g. frontend-only dev work, or Task 9.2's live-processing
   // fallback), this silently no-ops and the app keeps working on mock data.
+  // Pulled out into a standalone function (not just an effect body) so a
+  // Person rename (see KnowledgeGraphView's handleSaveLabel, which patches
+  // every affected meeting's stored speaker/assignee text server-side) can
+  // re-run this and have Decisions/Action Items/Transcript — and Dashboard's
+  // "My Action Tasks", which matches assignee text against currentUser.name
+  // — reflect the corrected name immediately, not just after a hard reload.
+  const refreshMeetingsFromBackend = React.useCallback(async () => {
+    try {
+      const items = await api.listMeetings();
+      if (items.length === 0) return;
+
+      // Promise.all rejects (and discards every already-fetched meeting)
+      // the moment a single item throws — one meeting with an unexpected
+      // real-mode extraction shape used to silently blank out the entire
+      // list, including previously-working ones. allSettled means one bad
+      // meeting is skipped (and logged) instead of taking the rest down.
+      const results = await Promise.allSettled(
+        items.map(async (item) => {
+          const [summary, transcript, graphData] = await Promise.all([
+            api.getMeetingSummary(item.id),
+            api.getMeetingTranscript(item.id),
+            api.getGraphData(item.id),
+          ]);
+          return api.mergeBackendIntoMeeting(
+            { id: item.id, title: item.title, project: item.project || 'Unassigned' },
+            item,
+            summary,
+            transcript,
+            graphData
+          );
+        })
+      );
+
+      const loaded: Meeting[] = [];
+      results.forEach((result, i) => {
+        if (result.status === 'fulfilled') {
+          // AI-extracted participants are whoever the model actually heard
+          // in the recording — for a real upload that's real names, not
+          // necessarily the demo's currentUser. Without this, any meeting
+          // where currentUser wasn't personally on the call is invisible
+          // in every "my meetings" personalized view (Dashboard, Meeting
+          // Intelligence both filter on participant name) from the very
+          // first page load, even though it's genuinely fully processed.
+          loaded.push(ensureCurrentUserIsParticipant(result.value, currentUser.name));
+        } else {
+          console.error(`[Corporate Brain] Failed to load meeting ${items[i].id} ("${items[i].title}"):`, result.reason);
+        }
+      });
+
+      if (loaded.length > 0) {
+        setMeetings((prev) => [...loaded, ...prev.filter((m) => !loaded.some((l) => l.id === m.id))]);
+      }
+    } catch (e) {
+      console.warn('[Corporate Brain] Backend not reachable, staying on demo data:', e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser.name]);
+
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
-      try {
-        const items = await api.listMeetings();
-        if (cancelled || items.length === 0) return;
-
-        // Promise.all rejects (and discards every already-fetched meeting)
-        // the moment a single item throws — one meeting with an unexpected
-        // real-mode extraction shape used to silently blank out the entire
-        // list, including previously-working ones. allSettled means one bad
-        // meeting is skipped (and logged) instead of taking the rest down.
-        const results = await Promise.allSettled(
-          items.map(async (item) => {
-            const [summary, transcript, graphData] = await Promise.all([
-              api.getMeetingSummary(item.id),
-              api.getMeetingTranscript(item.id),
-              api.getGraphData(item.id),
-            ]);
-            return api.mergeBackendIntoMeeting(
-              { id: item.id, title: item.title, project: item.project || 'Unassigned' },
-              item,
-              summary,
-              transcript,
-              graphData
-            );
-          })
-        );
-
-        const loaded: Meeting[] = [];
-        results.forEach((result, i) => {
-          if (result.status === 'fulfilled') {
-            // AI-extracted participants are whoever the model actually heard
-            // in the recording — for a real upload that's real names, not
-            // necessarily the demo's currentUser. Without this, any meeting
-            // where currentUser wasn't personally on the call is invisible
-            // in every "my meetings" personalized view (Dashboard, Meeting
-            // Intelligence both filter on participant name) from the very
-            // first page load, even though it's genuinely fully processed.
-            loaded.push(ensureCurrentUserIsParticipant(result.value, currentUser.name));
-          } else {
-            console.error(`[Corporate Brain] Failed to load meeting ${items[i].id} ("${items[i].title}"):`, result.reason);
-          }
-        });
-
-        if (!cancelled && loaded.length > 0) {
-          setMeetings((prev) => [...loaded, ...prev.filter((m) => !loaded.some((l) => l.id === m.id))]);
-        }
-      } catch (e) {
-        console.warn('[Corporate Brain] Backend not reachable, staying on demo data:', e);
-      }
+      if (!cancelled) await refreshMeetingsFromBackend();
     })();
-
     return () => {
       cancelled = true;
     };
@@ -1445,6 +1455,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         pendingJoinRoomCode,
         setPendingJoinRoomCode,
         processAudioForMeeting,
+        refreshMeetings: refreshMeetingsFromBackend,
         addMeeting,
         notifications: userNotifications,
         unreadCount: userUnreadCount,
