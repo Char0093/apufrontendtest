@@ -1,3 +1,12 @@
+---
+title: Corporate Brain Backend
+emoji: 🧠
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+---
+
 # Corporate Brain
 
 **Team Teh O Ais · Track 3: Intelligent Meeting Capture**
