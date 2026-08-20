@@ -262,6 +262,25 @@ export const CollaborativeWhiteboard = forwardRef<CollaborativeWhiteboardHandle,
     publishScene(updatedPages, currentPage);
   };
 
+  // Stable identity (never redefined across renders) is the whole point
+  // here: Excalidraw treats excalidrawAPI like a ref callback, so an
+  // inline arrow function — a new reference every render — was getting
+  // detached and reattached on every re-render of this component's
+  // parent (MeetingRoomView re-renders often: live captions, timers).
+  // Each reattachment re-ran the "restore initial scene" branch below,
+  // forcibly resetting the canvas to whatever pagesRef.current held at
+  // that moment — mid-keystroke or mid-stroke, wiping out whatever had
+  // just been drawn/typed. hasRestoredInitialScene guards it to run at
+  // most once regardless, as a second line of defense.
+  const hasRestoredInitialScene = useRef(false);
+  const handleExcalidrawAPI = useCallback((api: ExcalidrawImperativeAPI) => {
+    apiRef.current = api;
+    if (hasRestoredInitialScene.current) return;
+    hasRestoredInitialScene.current = true;
+    const initialElements = pagesRef.current[currentPageRef.current] || [];
+    if (initialElements.length > 0) api.updateScene({ elements: initialElements });
+  }, []);
+
   return (
     <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 sm:p-4 shadow-sm space-y-3 font-sans">
       {/* Top Header Bar & Page Controls */}
@@ -340,11 +359,7 @@ export const CollaborativeWhiteboard = forwardRef<CollaborativeWhiteboardHandle,
         {/* Bounded Sheet Document Box */}
         <div className="w-full max-w-[900px] h-[480px] rounded-xl bg-white shadow-2xl border border-slate-300 dark:border-slate-700 relative overflow-hidden shrink-0">
           <Excalidraw
-            excalidrawAPI={(api) => {
-              apiRef.current = api;
-              const initialElements = pagesRef.current[currentPageRef.current] || [];
-              if (initialElements.length > 0) api.updateScene({ elements: initialElements });
-            }}
+            excalidrawAPI={handleExcalidrawAPI}
             onChange={(elements) => {
               pagesRef.current[currentPageRef.current] = elements;
               if (!hasReceivedInitialScene.current) {
