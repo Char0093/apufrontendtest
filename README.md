@@ -257,4 +257,4 @@ Brings up `redis`, `neo4j` (Browser at `:7474`), `fastapi-backend` (`:8000`),
 
 ---
 
-*Corporate Brain — Built with FastAPI, React, Neo4j, Neon, Deepgram, Gemini, Groq, and LiveKit.*
+*Corporate Brain — Where Every Meeting Becomes Organizational Intelligence*
