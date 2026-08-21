@@ -16,7 +16,7 @@ from typing import Optional
 
 from app.core.config import get_settings
 from app.schemas.meeting_intelligence import Decision, Flag, FlagType
-from app.services import embedding_service
+from app.services import embedding_service, vertex_ai_service
 from app.services.gemini_service import call_agnes_api
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ def _judge_contradiction(new_text: str, past_text: str) -> Optional[tuple[str, s
     all (not just when a call happens to fail). Returns (reason, judge) —
     judge is "llm" or "keyword_fallback" — or None if no contradiction is
     found either way."""
-    if not settings.gemini_api_key and not settings.agnes_api_key:
+    if not vertex_ai_service.is_configured(settings) and not settings.agnes_api_key:
         reason = _keyword_fallback_judge(new_text, past_text)
         return (reason, "keyword_fallback") if reason else None
 
@@ -67,12 +67,10 @@ similar topic? Return ONLY JSON: {{"contradicts": true/false, "reason": "one sen
 """
     try:
         raw = ""
-        if settings.gemini_api_key:
-            from google import genai
-
-            client = genai.Client(api_key=settings.gemini_api_key)
+        if vertex_ai_service.is_configured(settings):
+            client = vertex_ai_service.get_client(settings)
             response = client.models.generate_content(
-                model="gemini-flash-latest",
+                model=vertex_ai_service.model_name(settings),
                 contents=prompt,
                 config={"response_mime_type": "application/json"},
             )

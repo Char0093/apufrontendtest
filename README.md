@@ -181,6 +181,36 @@ uvicorn app.main:app --reload
 Visit `http://127.0.0.1:8000/health` (expects `{"status": "ok"}`) and
 `http://127.0.0.1:8000/docs` for interactive API docs.
 
+### Vertex AI on Hugging Face Spaces
+
+The Windows credential path used locally is not available inside a Linux
+Hugging Face Space. In the backend Space, create a private secret named
+`GEMINI_SERVICE_ACCOUNT_JSON` and use the complete, compact contents of the
+service-account JSON file as its value. Never add that JSON to the repository.
+
+Add these Space variables:
+
+```env
+GEMINI_PROJECT_ID=apu-fintech-hackathon
+GEMINI_LOCATION=us-central1
+GEMINI_VERTEX_MODEL=gemini-2.5-flash
+DEMO_MODE=false
+```
+
+For local Windows development, leave `GEMINI_SERVICE_ACCOUNT_JSON` blank and
+set this in `backend/.env` instead:
+
+```env
+GEMINI_SERVICE_ACCOUNT_FILE=C:\APU_Fintech_hackathon\apu-fintech-hackathon-dcdcea979ca9.json
+GEMINI_PROJECT_ID=apu-fintech-hackathon
+GEMINI_LOCATION=us-central1
+GEMINI_VERTEX_MODEL=gemini-2.5-flash
+```
+
+The Google Cloud project must have billing and the Vertex AI API enabled, and
+the service account needs permission to invoke Vertex AI models. Restart the
+Space after changing its secrets or variables.
+
 ### 2. Frontend
 
 ```bash

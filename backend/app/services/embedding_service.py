@@ -7,6 +7,7 @@ import numpy as np
 
 from app.core.config import get_settings
 from app.schemas.meeting_intelligence import MeetingIntelligence
+from app.services import vertex_ai_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -19,10 +20,9 @@ _genai_client = None
 
 def _get_client():
     global _genai_client
-    if _genai_client is None and settings.gemini_api_key:
+    if _genai_client is None and vertex_ai_service.is_configured(settings):
         try:
-            from google import genai
-            _genai_client = genai.Client(api_key=settings.gemini_api_key)
+            _genai_client = vertex_ai_service.get_client(settings)
         except Exception as e:
             logger.warning(f"Google GenAI Client init notice: {e}")
     return _genai_client

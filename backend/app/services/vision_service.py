@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.core.config import get_settings
+from app.services import vertex_ai_service
 from app.services.gemini_service import call_agnes_api
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def extract_names_from_video(video_path: str) -> dict[float, list[str]]:
     """Ultra-fast Gemini Vision sampling: captures 2 strategic key frames (25% and 65%),
     and asks Gemini 2.5 Flash (Primary) to read ALL participant nameplates in under 2 seconds.
     Falls back to Agnes AI only if Gemini is unavailable."""
-    if not settings.gemini_api_key and not settings.agnes_api_key:
+    if not vertex_ai_service.is_configured(settings) and not settings.agnes_api_key:
         return {}
 
     import cv2
@@ -56,10 +57,9 @@ def extract_names_from_video(video_path: str) -> dict[float, list[str]]:
     frames_dir.mkdir(parents=True, exist_ok=True)
 
     gemini_client = None
-    if settings.gemini_api_key:
+    if vertex_ai_service.is_configured(settings):
         try:
-            from google import genai
-            gemini_client = genai.Client(api_key=settings.gemini_api_key)
+            gemini_client = vertex_ai_service.get_client(settings)
         except Exception:
             gemini_client = None
 
@@ -116,7 +116,7 @@ def extract_names_from_video(video_path: str) -> dict[float, list[str]]:
                 if gemini_client:
                     try:
                         from google.genai import types
-                        for model_name in ["gemini-2.5-flash"]:
+                        for model_name in [vertex_ai_service.model_name(settings)]:
                             for attempt in range(2):
                                 try:
                                     resp = gemini_client.models.generate_content(
