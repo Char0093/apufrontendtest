@@ -216,9 +216,23 @@ def map_speakers_to_names(
     final_map: dict[str, str] = {}
     assigned_names = set()
 
+    # A live meeting's segments already carry a real name in `speaker` — it's
+    # the verified LiveKit display_name written straight in by
+    # app/api/live_meeting.py's _forward_deepgram_results, never a raw
+    # diarization tag. Only actual "SPEAKER_01"-style tags (the uploaded-file
+    # pipeline's asr_service output) need the AI/vision mapping below; a name
+    # with no digits in it fell through every pass to Pass 3's fallback,
+    # which was relabeling it "Participant N" since it has nothing to derive
+    # a number from except the speaker's arrival order.
+    _RAW_TAG = re.compile(r"(?i)^speaker[\s_]*\d+$|^\d+$")
+    for spk in unique_speakers:
+        if not _RAW_TAG.match(spk.strip()):
+            final_map[spk] = spk
+            assigned_names.add(spk)
+
     # Pass 1: Apply normalized AI / vision mappings
     for spk in unique_speakers:
-        if spk in normalized_map:
+        if spk not in final_map and spk in normalized_map:
             name = normalized_map[spk]
             final_map[spk] = name
             assigned_names.add(name)
