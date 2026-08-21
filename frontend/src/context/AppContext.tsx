@@ -1310,33 +1310,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     const timeRange = `${data.startTime} - ${data.endTime}`;
 
-    // Schedule on the backend first so the meeting and every invitee's RSVP
-    // exist server-side from the start — otherwise this only ever lived in
-    // this browser's localStorage, invisible to any other device the same
-    // (or an invited) user logs into. Falls back to the old local-only
-    // record if the backend can't be reached, same graceful-degradation
-    // pattern as the rest of this app.
-    let newMeetingId = `mtg-${Date.now()}`;
-    let assignedRoomCode = (data.roomCode || `CORP-${Math.random().toString(36).substring(2, 6).toUpperCase()}`).trim();
-    let scheduledOnBackend = false;
-    try {
-      const created = await api.scheduleMeeting({
-        title: data.title,
-        project: `${data.department} Sync`,
-        date: data.date,
-        time_range: timeRange,
-        department: data.department,
-        participant_names: participantNames,
-      });
-      newMeetingId = created.id;
-      assignedRoomCode = created.room_id || assignedRoomCode;
-      scheduledOnBackend = true;
-    } catch (err) {
-      console.warn('[Corporate Brain] Could not schedule meeting on the backend, staying local-only:', err);
-    }
+    const localMeetingId = `mtg-${Date.now()}`;
+    const localRoomCode = (data.roomCode || `CORP-${Math.random().toString(36).substring(2, 6).toUpperCase()}`).trim();
 
     const newMeeting: Meeting = {
-      id: newMeetingId,
+      id: localMeetingId,
       title: data.title,
       project: `${data.department} Sync`,
       dateTime: `${data.date} ${data.startTime}`,
@@ -1349,21 +1327,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       decisions: [],
       actionItems: [],
       transcript: [],
-      roomCode: assignedRoomCode,
+      roomCode: localRoomCode,
       hostName: currentUser.name,
       hostEmail: currentUser.email
     };
 
+    // Show the card and close the modal immediately — same "zero lag"
+    // pattern as MeetingRoomView.handleLeaveMeeting. Scheduling on the
+    // backend is a real network round-trip against a free-tier,
+    // cold-starting Hugging Face Space; blocking the whole modal on it (the
+    // previous version of this fix) turned "Dispatching Invites..." into a
+    // multi-second stall the host had to sit through. The backend call
+    // still happens below, it just doesn't hold the UI hostage while it
+    // does — id/roomCode get reconciled to the backend's real values once
+    // it responds.
     setMeetings(prev => [newMeeting, ...prev]);
+    setIsCreateMeetingOpen(false);
 
-    // The backend already wrote a real notification for each invitee (see
-    // POST /meetings) when scheduling succeeded there — that's the only path
-    // that ever reaches another person's account. When scheduling failed,
-    // this meeting only exists in this browser, so participantIds never
-    // actually got invited — surface that honestly instead of a
-    // self-congratulatory "Invitation Sent" notification only the host will
-    // ever see, which used to claim success while nothing was sent.
-    if (!scheduledOnBackend) {
+    // Schedule on the backend so the meeting and every invitee's RSVP exist
+    // server-side — otherwise this only ever lived in this browser's
+    // localStorage, invisible to any other device the same (or an invited)
+    // user logs into.
+    try {
+      const created = await api.scheduleMeeting({
+        title: data.title,
+        project: `${data.department} Sync`,
+        date: data.date,
+        time_range: timeRange,
+        department: data.department,
+        participant_names: participantNames,
+      });
+      // Swap the local placeholder id for the backend's real one — every
+      // later fetch (summary/transcript/graph/export/delete) is keyed off
+      // meeting.id, so anything still pointing at the placeholder would
+      // 404 forever.
+      setMeetings(prev => prev.map(m => m.id === localMeetingId
+        ? { ...m, id: created.id, roomCode: created.room_id || localRoomCode }
+        : m
+      ));
+      return true;
+    } catch (err) {
+      console.warn('[Corporate Brain] Could not schedule meeting on the backend, staying local-only:', err);
+      // The backend writes a real notification for each invitee (see
+      // POST /meetings) when scheduling succeeds there — that's the only
+      // path that ever reaches another person's account. Since it failed,
+      // this meeting only exists in this browser and participantIds never
+      // actually got invited — surface that honestly instead of a
+      // self-congratulatory "Invitation Sent" notification only the host
+      // will ever see, which used to claim success while nothing was sent.
       const newNotifications: Notification[] = data.participantIds.map((empId, index) => {
         const emp = employees.find(e => e.id === empId);
         const recipientName = emp ? emp.name : 'Participant';
@@ -1375,17 +1386,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           read: false,
           category: 'meeting',
           type: 'INVITATION',
-          meetingId: newMeetingId,
+          meetingId: localMeetingId,
           senderName: currentUser.name,
           recipientName: recipientName,
           targetTab: 'meetings'
         };
       });
-
       setNotifications(prev => [...newNotifications, ...prev]);
+      return false;
     }
-    setIsCreateMeetingOpen(false);
-    return scheduledOnBackend;
   };
 
   const [isDmDrawerOpen, setIsDmDrawerOpen] = useState<boolean>(false);

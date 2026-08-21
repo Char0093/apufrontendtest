@@ -42,16 +42,31 @@ type JoinDetails = { token: string; serverUrl: string; roomName: string; display
 // local development, so route that one local-only case to the IPv4 loopback.
 const apiBaseUrl = API_BASE;
 
+// The backend can be a cold-starting free-tier Hugging Face Space, so a
+// slow-but-successful response is normal — but with no timeout at all, a
+// truly stuck connection left "Joining…" spinning forever with zero
+// feedback. 30s is generous enough to cover a real cold start while still
+// eventually telling the host something's wrong instead of hanging silently.
+const JOIN_TIMEOUT_MS = 30_000;
+
 async function getJoinDetails(roomName: string, displayName: string): Promise<JoinDetails> {
   let response: Response;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), JOIN_TIMEOUT_MS);
   try {
     response = await fetch(`${apiBaseUrl}/livekit/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ room_name: roomName, display_name: displayName }),
+      signal: timeoutController.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('The meeting server is taking too long to respond — it may be waking up from sleep. Please try again in a moment.');
+    }
     throw new Error(`Cannot reach the meeting server at ${apiBaseUrl}. Start FastAPI on port 8000, then try again.`);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   let payload: { token?: string; server_url?: string; detail?: string } = {};

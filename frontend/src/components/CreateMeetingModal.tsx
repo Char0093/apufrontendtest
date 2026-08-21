@@ -60,8 +60,6 @@ export const CreateMeetingModal: React.FC = () => {
     }
   }, [isCreateMeetingOpen, organizerEmp, employees]);
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
   // Click outside & Escape key handler to close participant dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -115,12 +113,17 @@ export const CreateMeetingModal: React.FC = () => {
     setSelectedParticipantIds(prev => prev.filter(id => id !== empId));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
-    setIsSubmitting(true);
-    const sentToServer = await addMeeting({
+    const submittedTitle = title;
+    // addMeeting() shows the card and closes this modal immediately (it
+    // schedules on the backend in the background) — so reset the form right
+    // away too, rather than waiting on that network round-trip, otherwise
+    // reopening this modal quickly would still show the just-submitted
+    // meeting's stale title/description.
+    addMeeting({
       title,
       description,
       date,
@@ -129,23 +132,22 @@ export const CreateMeetingModal: React.FC = () => {
       department,
       participantIds: selectedParticipantIds,
       roomCode
+    }).then((sentToServer) => {
+      // addMeeting() always keeps a local copy of the meeting even when the
+      // backend couldn't be reached — otherwise the host loses the whole
+      // form — but a local-only meeting never actually invites anyone
+      // else. Tell the host once we know, not just via a notification they
+      // may not read, so they know to retry instead of assuming invites
+      // went out.
+      if (!sentToServer) {
+        window.alert(
+          `"${submittedTitle}" was saved on this device, but the server couldn't be reached — invited teammates will NOT see it until you reschedule once you're back online.`
+        );
+      }
     });
-    setIsSubmitting(false);
-    // Reset state
     setTitle('');
     setDescription('');
     setParticipantSearch('');
-
-    // addMeeting() always keeps a local copy of the meeting even when the
-    // backend couldn't be reached — otherwise the host loses the whole form
-    // — but a local-only meeting never actually invites anyone else. Tell
-    // the host now, not just via a notification they may not read, so they
-    // know to retry instead of assuming invites went out.
-    if (!sentToServer) {
-      window.alert(
-        `"${title}" was saved on this device, but the server couldn't be reached — invited teammates will NOT see it until you reschedule once you're back online.`
-      );
-    }
   };
 
   return (
@@ -428,11 +430,10 @@ export const CreateMeetingModal: React.FC = () => {
 
             <button
               type="submit"
-              disabled={isSubmitting}
               className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-2xl shadow-lg shadow-blue-600/30 flex items-center space-x-2 transition-all disabled:opacity-50 hover:scale-[1.02] cursor-pointer"
             >
               <Send className="w-4 h-4" />
-              <span>{isSubmitting ? 'Dispatching Invites...' : 'Create & Send Invitations'}</span>
+              <span>Create & Send Invitations</span>
             </button>
           </div>
 
