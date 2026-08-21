@@ -25,10 +25,13 @@ export const CreateMeetingModal: React.FC = () => {
   const [endTime, setEndTime] = useState('15:00');
   const [department, setDepartment] = useState('Engineering & AI');
 
-  // Random 5-character alphanumeric room code generator (e.g. B7M3P)
+  // Random room code generator, matching the backend's CORP-XXXX format
+  // (see _generate_room_code in backend/app/api/meetings.py) so the code
+  // previewed here isn't a different-looking code from the one the meeting
+  // actually ends up with once it's scheduled on the backend.
   const generateRoomCode = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    return Array.from({ length: 5 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
+    return `CORP-${Array.from({ length: 4 }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('')}`;
   };
 
   const [roomCode, setRoomCode] = useState(generateRoomCode());

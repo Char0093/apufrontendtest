@@ -177,8 +177,13 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
   const activeGraphData: GraphData = useMemo(() => {
     // 1. If viewing a specific single meeting (e.g. from MeetingDetailView tab or single filter)
     if (selectedMeetingId !== 'ALL') {
-      // Prioritize directly passed single-meeting graphData if provided
-      if (data && data.nodes && data.nodes.length > 0 && currentMeetingId) {
+      // Only trust `data` as already meeting-scoped when the CALLER pinned a
+      // specific meeting via the currentMeetingId prop (e.g. MeetingDetailView's
+      // tab). On the Memory Graph page currentMeetingId is the literal string
+      // "ALL" — truthy, so without this !== check the in-page filter dropdown
+      // was ignored and the full unfiltered global graph rendered no matter
+      // which meeting was selected.
+      if (data && data.nodes && data.nodes.length > 0 && currentMeetingId && currentMeetingId !== 'ALL') {
         return {
           nodes: data.nodes.map(n => ({ ...n })),
           links: (data.links || []).map(l => ({

@@ -1270,7 +1270,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // record if the backend can't be reached, same graceful-degradation
     // pattern as the rest of this app.
     let newMeetingId = `mtg-${Date.now()}`;
-    let assignedRoomCode = (data.roomCode || Math.random().toString(36).substring(2, 7).toUpperCase()).trim();
+    let assignedRoomCode = (data.roomCode || `CORP-${Math.random().toString(36).substring(2, 6).toUpperCase()}`).trim();
     let scheduledOnBackend = false;
     try {
       const created = await api.scheduleMeeting({
