@@ -83,6 +83,27 @@ function graphEndpointId(endpoint: string | { id?: string } | undefined): string
   return typeof endpoint === 'string' ? endpoint : endpoint?.id ?? '';
 }
 
+// Content fingerprint of a graph. The cross-device poll in AppContext
+// rebuilds `meetings` from scratch every 10s, so every derived array and
+// object below gets a new identity on every tick even when not one node or
+// edge actually changed. Comparing fingerprints instead of identities is
+// what lets the simulation be left alone in that (overwhelmingly common)
+// case — see the stable-identity wrapper around activeGraphData.
+function graphSignature(g: GraphData): string {
+  const nodes = g.nodes
+    .map(n => `${n.id}|${n.type ?? ''}|${n.name ?? ''}`)
+    .sort()
+    .join(',');
+  const links = (g.links || [])
+    .map(l =>
+      `${graphEndpointId(l.source as any)}>${graphEndpointId(l.target as any)}` +
+      `:${(l as any).label ?? (l as any).type ?? ''}`
+    )
+    .sort()
+    .join(',');
+  return `${nodes}#${links}`;
+}
+
 export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
   data,
   meetings,
@@ -92,6 +113,9 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
   const { sendDirectMessage, refreshMeetings } = useApp();
   const { isDark } = useTheme();
   const fgRef = useRef<any>();
+  // Set when the graph changed and is owed a zoom-to-fit; consumed by
+  // onEngineStop once the force simulation has cooled.
+  const pendingFitRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // react-force-graph-2d's own auto-sizing measures the container on mount
@@ -126,6 +150,13 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
   );
 
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  // Lets the graph-changed effect below check what's currently open without
+  // taking selectedNode as a dependency (which would re-run the whole force
+  // reconfigure + zoom-to-fit every time the user merely clicked a node).
+  const selectedNodeRef = useRef<GraphNode | null>(null);
+  useEffect(() => {
+    selectedNodeRef.current = selectedNode;
+  }, [selectedNode]);
   const [draggedNode, setDraggedNode] = useState<GraphNode | null>(null);
   const [isCopied, setIsCopied] = useState(false);
   const [showMessageModal, setShowMessageModal] = useState(false);
@@ -174,7 +205,7 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
     }
   }, [currentMeetingId]);
 
-  const activeGraphData: GraphData = useMemo(() => {
+  const computedGraphData: GraphData = useMemo(() => {
     // 1. If viewing a specific single meeting (e.g. from MeetingDetailView tab or single filter)
     if (selectedMeetingId !== 'ALL') {
       // Only trust `data` as already meeting-scoped when the CALLER pinned a
@@ -279,26 +310,74 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
     return { nodes: [], links: [] };
   }, [selectedMeetingId, currentMeetingId, completedMeetings, meetings, data]);
 
-  // Configure force layout parameters & auto zoom-to-fit when active graph data changes
+  // The memo above rebuilds fresh node/link objects from `meetings`, which
+  // the 10s cross-device poll replaces wholesale every tick. Handing those
+  // straight to ForceGraph2D meant that every 10s: the simulation was
+  // reheated (the visible "bounce"), the canvas was re-fit (the "blink"),
+  // the node objects lost the x/y the simulation had written onto them so
+  // the layout re-solved from scratch and drifted wider (edges "getting
+  // longer"), and any open node detail panel — a Decision or Action Item
+  // the user was reading — was closed by the reset below.
+  //
+  // Nothing about the graph had actually changed in any of those ticks, so
+  // gate on content rather than identity: same fingerprint, same object
+  // back, and every effect keyed on it simply doesn't fire.
+  const stableGraphRef = useRef<{ signature: string; data: GraphData } | null>(null);
+  const activeGraphData: GraphData = useMemo(() => {
+    const signature = graphSignature(computedGraphData);
+    const previous = stableGraphRef.current;
+    if (previous && previous.signature === signature) return previous.data;
+
+    // A real change (a meeting finished processing, a node was renamed)
+    // still re-renders — but reuse the *existing node object* for every id
+    // that survived it. ForceGraph2D writes each node's simulated position
+    // onto the object it was given, so carrying those objects over is what
+    // keeps the untouched part of the graph exactly where the user last
+    // saw it instead of re-solving the whole layout around one new node.
+    const survivingNodes = new Map<string, any>(
+      (previous?.data.nodes || []).map((n: any) => [n.id, n])
+    );
+    const nodes = computedGraphData.nodes.map((node) => {
+      const existing = survivingNodes.get(node.id);
+      if (!existing) return node;
+      const { x, y, vx, vy, fx, fy } = existing;
+      return Object.assign(existing, node, { x, y, vx, vy, fx, fy });
+    });
+
+    const next: GraphData = { nodes, links: computedGraphData.links };
+    stableGraphRef.current = { signature, data: next };
+    return next;
+  }, [computedGraphData]);
+
+  // Configure force layout parameters & auto zoom-to-fit when the graph
+  // genuinely changes. `dimensions` is a dependency because ForceGraph2D
+  // isn't rendered at all until the container has been measured (see the
+  // render below), so on the very first pass fgRef is still empty and the
+  // force config would otherwise never be applied.
   useEffect(() => {
-    setSelectedNode(null);
+    // Only tear down the open detail panel if the node it describes is
+    // actually gone from the new graph — a graph that grew by one meeting
+    // is no reason to close the Decision someone was reading.
+    const openNode = selectedNodeRef.current;
+    if (openNode && !activeGraphData.nodes.some((n) => n.id === openNode.id)) {
+      setSelectedNode(null);
+      setShowMessageModal(false);
+    }
     setDraggedNode(null);
-    setShowMessageModal(false);
 
     if (fgRef.current) {
       fgRef.current.d3Force('charge')?.strength(-1000).distanceMax(1200);
       fgRef.current.d3Force('link')?.distance(220);
       fgRef.current.d3ReheatSimulation();
-
-      const timer = setTimeout(() => {
-        if (fgRef.current && fgRef.current.zoomToFit) {
-          fgRef.current.zoomToFit(400, 50);
-        }
-      }, 250);
-
-      return () => clearTimeout(timer);
+      // Fit once the layout has actually settled (onEngineStop below), not
+      // on a fixed 250ms timer. The timer fired while the simulation was
+      // still spreading nodes apart, so it framed a layout that no longer
+      // existed a moment later and nodes ended up drifting outside the
+      // fitted viewport — reading as nodes having gone missing.
+      pendingFitRef.current = true;
     }
-  }, [selectedMeetingId, activeGraphData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMeetingId, activeGraphData, dimensions.width, dimensions.height]);
 
   // Any node click opens the generic detail panel (Meeting/Decision/
   // Person/Project/ActionItem alike) — previously only Person nodes did.
@@ -489,6 +568,11 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
           graphData={activeGraphData}
           cooldownTicks={100}
           d3VelocityDecay={0.3}
+          onEngineStop={() => {
+            if (!pendingFitRef.current) return;
+            pendingFitRef.current = false;
+            fgRef.current?.zoomToFit?.(400, 50);
+          }}
           nodeRelSize={6}
           onNodeClick={handleNodeClick}
           onNodeDrag={(node: any) => setDraggedNode(node as GraphNode)}

@@ -26,6 +26,44 @@ function ensureCurrentUserIsParticipant(meeting: Meeting, currentUserName: strin
   return alreadyListed ? meeting : { ...meeting, participants: [...meeting.participants, currentUserName] };
 }
 
+/** Whether a freshly-merged meeting says anything the one already in state
+ * didn't. The 10s poll re-derives every meeting from scratch, so without
+ * this check `setMeetings` handed React a new array of new objects on every
+ * tick even when the backend had returned byte-identical data — re-rendering
+ * every consumer and, for the graph views, throwing away a settled force
+ * layout (see KnowledgeGraphView's fingerprint gate for the other half).
+ *
+ * The heavy arrays are compared by reference on purpose, not deep-equality:
+ * when nothing was re-fetched, mergeBackendIntoMeeting falls back to the
+ * very same array instances it was handed, so identity is both exact and
+ * O(1) here. A re-fetch always produces new instances and is correctly
+ * reported as changed. Only `participants` needs a value comparison — it's
+ * rebuilt from JSON on every response. */
+function isMeetingUnchanged(next: Meeting, previous: Meeting): boolean {
+  if (next === previous) return true;
+
+  const scalars: (keyof Meeting)[] = [
+    'id', 'title', 'project', 'dateTime', 'timeRange', 'department', 'status',
+    'duration', 'summary', 'audioFileName', 'fileSize', 'completedAt',
+    'roomCode', 'hostName', 'source',
+  ];
+  for (const key of scalars) {
+    if (next[key] !== previous[key]) return false;
+  }
+
+  const byReference: (keyof Meeting)[] = [
+    'decisions', 'actionItems', 'transcript', 'contradictions', 'graphData',
+  ];
+  for (const key of byReference) {
+    if (next[key] !== previous[key]) return false;
+  }
+
+  const a = next.participants || [];
+  const b = previous.participants || [];
+  if (a.length !== b.length) return false;
+  return a.every((p, i) => p === b[i]);
+}
+
 // Mock Employees Directory
 const initialEmployees: Employee[] = [
   {
@@ -629,6 +667,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     meetingsRef.current = meetings;
   }, [meetings]);
 
+  // Every meeting id the backend has ever listed. The poll below uses it to
+  // tell "the server deleted this" apart from "this meeting never lived on
+  // the server at all" (bundled demo data, a just-scheduled meeting whose
+  // local `mtg-<ts>` id hasn't been reconciled to a backend one yet). Only
+  // the former may be pruned from local state.
+  //
+  // Persisted alongside the meetings themselves, because the meetings are:
+  // a purely in-memory set would start empty on every reload, so a meeting
+  // cancelled on another device while this one was closed would come back
+  // from localStorage and never be recognised as deleted.
+  const SERVER_MEETING_IDS_KEY = 'corporate_brain_server_meeting_ids';
+  const serverKnownMeetingIdsRef = useRef<Set<string>>(
+    (() => {
+      try {
+        const saved = localStorage.getItem(SERVER_MEETING_IDS_KEY);
+        return new Set<string>(saved ? JSON.parse(saved) : []);
+      } catch {
+        return new Set<string>();
+      }
+    })()
+  );
+  const rememberServerMeetingIds = React.useCallback(() => {
+    try {
+      localStorage.setItem(
+        SERVER_MEETING_IDS_KEY,
+        JSON.stringify([...serverKnownMeetingIdsRef.current])
+      );
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem('corporate_brain_meetings', JSON.stringify(meetings));
@@ -820,7 +890,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshMeetingsFromBackend = React.useCallback(async () => {
     try {
       const items = await api.listMeetings();
-      if (items.length === 0) return;
+      // No early return on an empty list: "the backend has no meetings" is
+      // real information, not a no-op. If the only scheduled meeting was
+      // just cancelled on another device, bailing out here left the stale
+      // card on screen forever, because the prune below never ran.
+      items.forEach((item) => serverKnownMeetingIdsRef.current.add(item.id));
 
       // Promise.all rejects (and discards every already-fetched meeting)
       // the moment a single item throws — one meeting with an unexpected
@@ -881,14 +955,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // in every "my meetings" personalized view (Dashboard, Meeting
           // Intelligence both filter on participant name) from the very
           // first page load, even though it's genuinely fully processed.
-          loaded.push(ensureCurrentUserIsParticipant(result.value, currentUser.name));
+          const merged = ensureCurrentUserIsParticipant(result.value, currentUser.name);
+          // Hand back the object already in state when the poll learned
+          // nothing new, so the array below can be recognised as unchanged.
+          const previous = meetingsRef.current.find((m) => m.id === merged.id);
+          loaded.push(previous && isMeetingUnchanged(merged, previous) ? previous : merged);
         } else {
           console.error(`[Corporate Brain] Failed to load meeting ${items[i].id} ("${items[i].title}"):`, result.reason);
         }
       });
 
-      if (loaded.length > 0) {
-        setMeetings((prev) => [...loaded, ...prev.filter((m) => !loaded.some((l) => l.id === m.id))]);
+      // The merge used to be purely additive, so local state could only ever
+      // grow: a meeting the backend had deleted (host cancels a scheduled
+      // meeting) stayed on every *other* device indefinitely, and — because
+      // meetings are persisted to localStorage above — survived a reload
+      // too. Treat the backend's list as authoritative for the ids it owns:
+      // anything we've previously seen from /meetings but that is absent
+      // now has been deleted server-side and must go. Meetings the backend
+      // never knew about are left alone.
+      const liveIds = new Set(items.map((item) => item.id));
+      const deletedIds = new Set(
+        [...serverKnownMeetingIdsRef.current].filter((id) => !liveIds.has(id))
+      );
+      deletedIds.forEach((id) => serverKnownMeetingIdsRef.current.delete(id));
+      rememberServerMeetingIds();
+
+      if (loaded.length > 0 || deletedIds.size > 0) {
+        setMeetings((prev) => {
+          const next = [
+            ...loaded,
+            ...prev.filter((m) => !loaded.some((l) => l.id === m.id) && !deletedIds.has(m.id)),
+          ];
+          // Returning `prev` makes React skip the re-render outright — the
+          // difference between "the poll ran" and "anything changed".
+          const identical =
+            next.length === prev.length && next.every((m, i) => m === prev[i]);
+          return identical ? prev : next;
+        });
       }
     } catch (e) {
       console.warn('[Corporate Brain] Backend not reachable, staying on demo data:', e);
@@ -926,7 +1029,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser.name]);
+  }, [currentUser.name, rememberServerMeetingIds]);
 
   // Cross-device polling: none of the refresh functions above ever re-run
   // on their own after the initial mount/user-switch fetch, so a change
@@ -1138,7 +1241,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // removal followed by a fire-and-forget delete meant any delete failure
     // (backend cold-start, a transient error) was invisible: the card
     // vanished immediately but the meeting was still there server-side, so
-    // the next poll (see the 45s cross-device refresh above) brought it
+    // the next poll (see the cross-device refresh above) brought it
     // right back with no indication anything had gone wrong.
     const ok = await api.deleteMeeting(meetingId);
     if (ok) {

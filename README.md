@@ -201,7 +201,7 @@ For local Windows development, leave `GEMINI_SERVICE_ACCOUNT_JSON` blank and
 set this in `backend/.env` instead:
 
 ```env
-GEMINI_SERVICE_ACCOUNT_FILE=C:\APU_Fintech_hackathon\apu-fintech-hackathon-dcdcea979ca9.json
+GOOGLE_APPLICATION_CREDENTIALS=C:\APU_Fintech_hackathon\apu-fintech-hackathon-dcdcea979ca9.json
 GEMINI_PROJECT_ID=apu-fintech-hackathon
 GEMINI_LOCATION=us-central1
 GEMINI_VERTEX_MODEL=gemini-2.5-flash

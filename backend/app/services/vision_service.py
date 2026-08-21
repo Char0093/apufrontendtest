@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.core.config import get_settings
-from app.services import vertex_ai_service
+from app.core.genai_client import gemini_available, gemini_model, get_genai_client
 from app.services.gemini_service import call_agnes_api
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def extract_names_from_video(video_path: str) -> dict[float, list[str]]:
     """Ultra-fast Gemini Vision sampling: captures 2 strategic key frames (25% and 65%),
     and asks Gemini 2.5 Flash (Primary) to read ALL participant nameplates in under 2 seconds.
     Falls back to Agnes AI only if Gemini is unavailable."""
-    if not vertex_ai_service.is_configured(settings) and not settings.agnes_api_key:
+    if not gemini_available() and not settings.agnes_api_key:
         return {}
 
     import cv2
@@ -56,12 +56,7 @@ def extract_names_from_video(video_path: str) -> dict[float, list[str]]:
     frames_dir = Path(settings.storage_path) / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    gemini_client = None
-    if vertex_ai_service.is_configured(settings):
-        try:
-            gemini_client = vertex_ai_service.get_client(settings)
-        except Exception:
-            gemini_client = None
+    gemini_client = get_genai_client()
 
     try:
         cap = cv2.VideoCapture(video_path)
@@ -116,7 +111,7 @@ def extract_names_from_video(video_path: str) -> dict[float, list[str]]:
                 if gemini_client:
                     try:
                         from google.genai import types
-                        for model_name in [vertex_ai_service.model_name(settings)]:
+                        for model_name in [gemini_model()]:
                             for attempt in range(2):
                                 try:
                                     resp = gemini_client.models.generate_content(
@@ -221,9 +216,23 @@ def map_speakers_to_names(
     final_map: dict[str, str] = {}
     assigned_names = set()
 
+    # A live meeting's segments already carry a real name in `speaker` — it's
+    # the verified LiveKit display_name written straight in by
+    # app/api/live_meeting.py's _forward_deepgram_results, never a raw
+    # diarization tag. Only actual "SPEAKER_01"-style tags (the uploaded-file
+    # pipeline's asr_service output) need the AI/vision mapping below; a name
+    # with no digits in it fell through every pass to Pass 3's fallback,
+    # which was relabeling it "Participant N" since it has nothing to derive
+    # a number from except the speaker's arrival order.
+    _RAW_TAG = re.compile(r"(?i)^speaker[\s_]*\d+$|^\d+$")
+    for spk in unique_speakers:
+        if not _RAW_TAG.match(spk.strip()):
+            final_map[spk] = spk
+            assigned_names.add(spk)
+
     # Pass 1: Apply normalized AI / vision mappings
     for spk in unique_speakers:
-        if spk in normalized_map:
+        if spk not in final_map and spk in normalized_map:
             name = normalized_map[spk]
             final_map[spk] = name
             assigned_names.add(name)

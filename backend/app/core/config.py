@@ -7,11 +7,18 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     gemini_api_key: str = ""
-    gemini_service_account_file: str = ""
-    gemini_service_account_json: str = ""
+    # Vertex AI mode (used instead of gemini_api_key when set): a GCP
+    # service-account key authenticates the same google-genai SDK against
+    # Vertex AI rather than the Gemini Developer API — no API key, billed to
+    # the GCP project instead of a per-key quota. Credentials come from
+    # either google_application_credentials (a file path) or
+    # gemini_service_account_json (the JSON document inline — what Hugging
+    # Face Spaces secrets need, since there's no way to mount a file there).
     gemini_project_id: str = ""
     gemini_location: str = "us-central1"
     gemini_vertex_model: str = "gemini-2.5-flash"
+    google_application_credentials: str = ""
+    gemini_service_account_json: str = ""
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_username: str = "neo4j"
     neo4j_password: str

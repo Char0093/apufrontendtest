@@ -54,6 +54,12 @@ def test_demo_safe_judge_fallback_flags_opposing_terms(monkeypatch):
         "settings",
         Settings(_env_file=None, neo4j_password="x", gemini_api_key="", agnes_api_key=""),
     )
+    # gemini_available() reads genai_client's own module-level settings
+    # (cached from the real environment at import time), not the settings
+    # object patched above — so forcing the keyless path also means forcing
+    # this directly, independent of whatever Gemini/Vertex credentials
+    # happen to be configured on the machine running the test.
+    monkeypatch.setattr(contradiction_service, "gemini_available", lambda: False)
     monkeypatch.setattr(
         contradiction_service.embedding_service,
         "query_similar_decisions",
