@@ -17,6 +17,7 @@ import urllib.request
 from typing import List, Optional
 
 from app.core.config import get_settings
+from app.core.genai_client import gemini_available, gemini_model, get_genai_client
 from app.schemas.meeting_intelligence import (
     ActionItem,
     Decision,
@@ -138,13 +139,14 @@ risks, and factual knowledge triples.
 """
 
     try:
-        # 1. PRIMARY: Gemini Flash (using new fresh API key)
-        if settings.gemini_api_key:
+        # 1. PRIMARY: Gemini Flash (Vertex AI if configured, else API key)
+        if gemini_available():
             try:
-                from google import genai
                 from google.genai import types
-                client = genai.Client(api_key=settings.gemini_api_key)
-                for model_name in ["gemini-2.5-flash"]:
+                client = get_genai_client()
+                if client is None:
+                    raise RuntimeError("Gemini client unavailable")
+                for model_name in [gemini_model()]:
                     for attempt in range(3):
                         try:
                             print(f"[GEMINI AI] >> Running intelligence extraction with {model_name} (attempt {attempt+1}/3)...", flush=True)

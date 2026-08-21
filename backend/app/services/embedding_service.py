@@ -6,6 +6,7 @@ from typing import List, Dict, Optional
 import numpy as np
 
 from app.core.config import get_settings
+from app.core.genai_client import get_genai_client as _get_client
 from app.schemas.meeting_intelligence import MeetingIntelligence
 
 logger = logging.getLogger(__name__)
@@ -13,19 +14,6 @@ settings = get_settings()
 
 _EMBED_DIR = Path(settings.storage_path) / "embeddings"
 _EMBED_DIR.mkdir(parents=True, exist_ok=True)
-
-_genai_client = None
-
-
-def _get_client():
-    global _genai_client
-    if _genai_client is None and settings.gemini_api_key:
-        try:
-            from google import genai
-            _genai_client = genai.Client(api_key=settings.gemini_api_key)
-        except Exception as e:
-            logger.warning(f"Google GenAI Client init notice: {e}")
-    return _genai_client
 
 
 def _stable_hash(text: str) -> str:

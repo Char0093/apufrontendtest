@@ -7,6 +7,14 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     gemini_api_key: str = ""
+    # Vertex AI mode (used instead of gemini_api_key when set): a GCP
+    # service-account JSON key authenticates the same google-genai SDK
+    # against Vertex AI rather than the Gemini Developer API — no API key,
+    # billed to the GCP project instead of a per-key quota.
+    gemini_project_id: str = ""
+    gemini_location: str = "us-central1"
+    gemini_vertex_model: str = "gemini-2.5-flash"
+    google_application_credentials: str = ""
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_username: str = "neo4j"
     neo4j_password: str

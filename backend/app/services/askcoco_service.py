@@ -52,6 +52,7 @@ import re
 from collections.abc import Callable
 
 from app.core.config import get_settings
+from app.core.genai_client import gemini_model, get_genai_client
 from app.core.logger import get_logger
 from app.graph.neo4j_service import run_query
 from app.services.storage_service import StorageService
@@ -280,12 +281,10 @@ def _synthesize_with_gemini(query: str, kind: str, results: list[dict]) -> str |
     the graph — it only summarizes data this module already retrieved, so
     this can't introduce an injection/authorization risk. Returns None on
     any failure so the caller can fall back to the deterministic formatter."""
-    if not settings.gemini_api_key:
+    client = get_genai_client()
+    if not client:
         return None
     try:
-        from google import genai
-
-        client = genai.Client(api_key=settings.gemini_api_key)
         prompt = f"""You are Coco, a corporate meeting-intelligence assistant. Answer the user's
 question using ONLY the JSON data below — it was already retrieved from the
 organization's knowledge graph for exactly this question. Do not invent facts
@@ -298,7 +297,7 @@ Current User: {active_user} ({user_role or "Staff"})
 User Question: {query_scoped}
 Data (kind={kind}): {results[:15]}
 """
-        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        response = client.models.generate_content(model=gemini_model(), contents=prompt)
         text = (response.text or "").strip()
         return text or None
     except Exception as exc:
@@ -383,11 +382,11 @@ Meeting Context: {json.dumps(stored_meetings[:5], default=str)}
     answer = _synthesize_with_groq(ai_prompt)
 
     # Fallback to Gemini 2.5 Flash
-    if not answer and settings.gemini_api_key:
-        try:
-            from google import genai
-            client = genai.Client(api_key=settings.gemini_api_key)
-            prompt = f"""You are Coco, an enterprise AI decision & meeting intelligence assistant.
+    if not answer:
+        client = get_genai_client()
+        if client:
+            try:
+                prompt = f"""You are Coco, an enterprise AI decision & meeting intelligence assistant.
 Answer the user's question accurately and helpfully using the corporate meeting context provided below.
 If there are specific decisions or action items, mention them clearly.
 If the query is a general question, answer conversationally.
@@ -396,11 +395,11 @@ Current User: {active_user} ({user_role or "Staff"})
 User Question: {query_scoped}
 Meeting Knowledge Context: {json.dumps(stored_meetings[:5], default=str)}
 """
-            resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-            if resp and resp.text:
-                answer = resp.text.strip()
-        except Exception as e:
-            logger.warning("Gemini Coco synthesis fallback: %s", e)
+                resp = client.models.generate_content(model=gemini_model(), contents=prompt)
+                if resp and resp.text:
+                    answer = resp.text.strip()
+            except Exception as e:
+                logger.warning("Gemini Coco synthesis fallback: %s", e)
 
     if not answer:
         answer = _format_answer_fallback(kind, results)
