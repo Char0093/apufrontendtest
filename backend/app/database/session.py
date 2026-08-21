@@ -43,6 +43,18 @@ engine = create_engine(
     # failing (or, without the timeout above, hanging) on a connection
     # that looked fine but was already gone.
     pool_pre_ping=True,
+    # Confirmed live this is what was actually happening: SQLAlchemy's
+    # default pool (size 5 + overflow 10 = 15) was fully exhausted, and
+    # every further request queued for the default pool_timeout (30s)
+    # before failing with "QueuePool limit ... reached, connection timed
+    # out, timeout 30.00" -- not a slow/unreachable database, a pool that
+    # was too small for how many concurrent requests this app legitimately
+    # fires (list_meetings' per-meeting summary/transcript/graph fan-out
+    # was the main driver -- see the fix in refreshMeetingsFromBackend).
+    # Doubling capacity here is a second line of defense, not the primary
+    # fix.
+    pool_size=10,
+    max_overflow=10,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

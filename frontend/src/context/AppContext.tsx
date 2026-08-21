@@ -803,11 +803,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // meeting is skipped (and logged) instead of taking the rest down.
       const results = await Promise.allSettled(
         items.map(async (item) => {
-          const [summary, transcript, graphData] = await Promise.all([
-            api.getMeetingSummary(item.id),
-            api.getMeetingTranscript(item.id),
-            api.getGraphData(item.id),
-          ]);
+          const existing = meetingsRef.current.find((m) => m.id === item.id);
+
+          // Once a meeting is Completed and already has its details loaded
+          // locally, its summary/transcript/graph never change again — so
+          // re-fetching all three every poll was pure waste. Worse than
+          // waste: this ran for EVERY meeting on EVERY poll, so as the
+          // meeting count grew this fan-out (3 requests × N meetings, all
+          // concurrent) started exhausting the backend's Postgres
+          // connection pool outright (confirmed live: "QueuePool limit of
+          // size 5 overflow 10 reached"), turning every endpoint into a
+          // 30s timeout — not a slow backend, a self-inflicted connection
+          // storm. Skip the re-fetch once there's nothing left to learn.
+          const alreadyLoaded =
+            existing?.status === 'Completed' &&
+            api.mapBackendStatus(item.status, item.progress) === 'Completed';
+
+          const [summary, transcript, graphData] = alreadyLoaded
+            ? [null, null, null]
+            : await Promise.all([
+                api.getMeetingSummary(item.id),
+                api.getMeetingTranscript(item.id),
+                api.getGraphData(item.id),
+              ]);
           // Base the merge on whatever this meeting already looked like
           // locally, not a bare {id, title, project} stub — mergeBackendIntoMeeting
           // falls back to base.decisions/actionItems/transcript/etc. whenever
@@ -817,7 +835,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // intelligence that was already showing (e.g. a live meeting's
           // client-synthesized decisions right after a participant left the
           // call, before the backend's own summary had finished).
-          const existing = meetingsRef.current.find((m) => m.id === item.id);
           return api.mergeBackendIntoMeeting(
             existing || { id: item.id, title: item.title, project: item.project || 'Unassigned' },
             item,
