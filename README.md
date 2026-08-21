@@ -1,4 +1,4 @@
-# 🧠 Corporate Brain hihi
+# 🧠 Corporate Brain hihihi
 
 ### Enterprise Meeting Intelligence & Organizational Memory Graph Platform
 
