@@ -219,13 +219,23 @@ def list_meetings(
     ):
         participant_names_by_meeting.setdefault(invite.meeting_id, []).append(employee_name)
 
+    # One query for every meeting's summary, not one new Postgres connection
+    # per meeting in the loop below — storage.get_summary() opens its own
+    # SessionLocal() per call, so calling it inside the loop meant a list of
+    # N meetings paid N sequential connection round-trips against Neon.
+    # Against a remote serverless Postgres, each fresh connection can itself
+    # cost real time, which added up to this endpoint taking tens of
+    # seconds (confirmed live: 15-90s+) as more meetings accumulated, even
+    # once the database itself was warm and responsive.
+    summaries_by_meeting: dict[str, dict] = dict(storage.list_summaries())
+
     items: list[MeetingListItem] = []
     for meeting in query.order_by(Meeting.created_at.desc()).all():
         # A declined invitation shouldn't keep showing up as a pending one.
         if invite_status_by_meeting.get(meeting.id) == "declined":
             continue
 
-        summary = storage.get_summary(meeting.id)
+        summary = summaries_by_meeting.get(meeting.id)
         if summary is not None and meeting.status.lower() in ["processing", "queued", "preprocessing", "asr", "llm", "graph"]:
             meeting.status = "completed"
             meeting.progress = 100
