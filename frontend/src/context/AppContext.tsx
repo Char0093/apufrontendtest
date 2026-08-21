@@ -491,7 +491,7 @@ interface AppContextType {
   deleteMeeting: (meetingId: string) => Promise<void>;
   stopAllProcessing: () => void;
   enterMeetingRoom: (roomCode: string, title?: string) => void;
-  cancelScheduledMeeting: (meetingId: string) => void;
+  cancelScheduledMeeting: (meetingId: string) => Promise<void>;
   rejectMeetingInvitation: (meetingId: string, userName?: string) => void;
   acceptMeetingInvitation: (meetingId: string) => void;
   addLiveMeetingIntelligence: (meeting: Meeting) => void;
@@ -508,7 +508,7 @@ interface AppContextType {
     department: string;
     participantIds: string[];
     roomCode?: string;
-  }) => void;
+  }) => Promise<boolean>;
 
   notifications: Notification[];
   unreadCount: number;
@@ -594,6 +594,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return initialMeetings;
     }
   });
+
+  // Lets refreshMeetingsFromBackend read the latest meetings without taking
+  // a `meetings` dependency (which would recreate that callback, and the
+  // polling interval effect below it, on every single state update).
+  const meetingsRef = useRef<Meeting[]>(meetings);
+  useEffect(() => {
+    meetingsRef.current = meetings;
+  }, [meetings]);
 
   useEffect(() => {
     try {
@@ -800,8 +808,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             api.getMeetingTranscript(item.id),
             api.getGraphData(item.id),
           ]);
+          // Base the merge on whatever this meeting already looked like
+          // locally, not a bare {id, title, project} stub — mergeBackendIntoMeeting
+          // falls back to base.decisions/actionItems/transcript/etc. whenever
+          // the backend isn't done processing yet (summary/transcript still
+          // null), so a bare stub here wiped those fields to empty on every
+          // 45s poll that ran ahead of the backend's own pipeline, erasing
+          // intelligence that was already showing (e.g. a live meeting's
+          // client-synthesized decisions right after a participant left the
+          // call, before the backend's own summary had finished).
+          const existing = meetingsRef.current.find((m) => m.id === item.id);
           return api.mergeBackendIntoMeeting(
-            { id: item.id, title: item.title, project: item.project || 'Unassigned' },
+            existing || { id: item.id, title: item.title, project: item.project || 'Unassigned' },
             item,
             summary,
             transcript,
@@ -870,21 +888,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Cross-device polling: none of the refresh functions above ever re-run
   // on their own after the initial mount/user-switch fetch, so a change
   // made on a different device (or even a different tab of this one) only
-  // ever shows up here after a manual page reload. Polling every 45s is a
-  // deliberately coarse interval — this is a demo-scale app on a free-tier
-  // backend, not something that needs sub-second staleness, and infrequent
-  // requests avoid hammering a backend that's already cold-starting on a
-  // Hugging Face Space.
+  // ever shows up here after a manual page reload. 45s was too coarse in
+  // practice — an invitee could sit staring at an empty dashboard for the
+  // better part of a minute after being invited. 10s is still cheap for a
+  // demo-scale backend and cuts that wait to something that doesn't feel
+  // broken.
   useEffect(() => {
-    const POLL_INTERVAL_MS = 45_000;
-    const interval = setInterval(() => {
+    const POLL_INTERVAL_MS = 10_000;
+
+    const runPoll = () => {
       if (document.visibilityState !== 'visible') return;
       void refreshMeetingsFromBackend();
       void refreshNotificationsFromBackend();
       void refreshDirectMessagesFromBackend();
       void refreshPersonalDashboardFromBackend();
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    };
+
+    const interval = setInterval(runPoll, POLL_INTERVAL_MS);
+
+    // Backgrounded tabs skip every tick above (no point polling what isn't
+    // shown), which used to mean coming back to the tab still waited a full
+    // interval for the next scheduled tick — e.g. switch away right after
+    // being invited, switch back a minute later, and still see nothing for
+    // up to another 45s. Refresh immediately the moment the tab becomes
+    // visible again instead of waiting for the timer to catch up.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') runPoll();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [refreshMeetingsFromBackend, refreshNotificationsFromBackend, refreshDirectMessagesFromBackend, refreshPersonalDashboardFromBackend]);
 
   const unreadCount = useMemo(() => {
@@ -991,9 +1027,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveTab('live-meeting');
   };
 
-  const cancelScheduledMeeting = (meetingId: string) => {
-    setMeetings(prev => prev.filter(m => m.id !== meetingId));
-    api.deleteMeeting(meetingId).catch(err => console.warn('[Corporate Brain] Could not cancel meeting on the backend:', err));
+  const cancelScheduledMeeting = async (meetingId: string) => {
+    // Wait for backend confirmation before removing locally — an optimistic
+    // removal followed by a fire-and-forget delete meant any delete failure
+    // (backend cold-start, a transient error) was invisible: the card
+    // vanished immediately but the meeting was still there server-side, so
+    // the next poll (see the 45s cross-device refresh above) brought it
+    // right back with no indication anything had gone wrong.
+    const ok = await api.deleteMeeting(meetingId);
+    if (ok) {
+      setMeetings(prev => prev.filter(m => m.id !== meetingId));
+    } else {
+      console.warn('[Corporate Brain] Could not cancel meeting on the backend:', meetingId);
+      window.alert('Could not cancel the meeting — please check your connection and try again.');
+    }
   };
 
   const rejectMeetingInvitation = (meetingId: string, userName?: string) => {
@@ -1310,16 +1357,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMeetings(prev => [newMeeting, ...prev]);
 
     // The backend already wrote a real notification for each invitee (see
-    // POST /meetings) when scheduling succeeded there — only fall back to a
-    // local-only one, visible solely on this device, if it didn't.
+    // POST /meetings) when scheduling succeeded there — that's the only path
+    // that ever reaches another person's account. When scheduling failed,
+    // this meeting only exists in this browser, so participantIds never
+    // actually got invited — surface that honestly instead of a
+    // self-congratulatory "Invitation Sent" notification only the host will
+    // ever see, which used to claim success while nothing was sent.
     if (!scheduledOnBackend) {
       const newNotifications: Notification[] = data.participantIds.map((empId, index) => {
         const emp = employees.find(e => e.id === empId);
         const recipientName = emp ? emp.name : 'Participant';
         return {
           id: `notif-invite-${Date.now()}-${index}`,
-          title: `Meeting Invitation Sent 📅`,
-          message: `${currentUser.name} invited you to "${data.title}" scheduled for ${data.date} at ${data.startTime}.`,
+          title: `⚠️ Invitation Not Sent`,
+          message: `Could not reach the server to invite ${recipientName} to "${data.title}" — they will NOT see this meeting until it's rescheduled successfully.`,
           timestamp: 'Just now',
           read: false,
           category: 'meeting',
@@ -1334,6 +1385,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setNotifications(prev => [...newNotifications, ...prev]);
     }
     setIsCreateMeetingOpen(false);
+    return scheduledOnBackend;
   };
 
   const [isDmDrawerOpen, setIsDmDrawerOpen] = useState<boolean>(false);

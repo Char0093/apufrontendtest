@@ -14,6 +14,7 @@ from app.core.logger import get_logger
 from app.database.session import get_db
 from app.models.employee import Employee, MeetingParticipant
 from app.models.meeting import Meeting, MeetingInvite, ProcessingTask
+from app.models.meeting_content import MeetingContent
 from app.models.notification import NotificationRecord
 from app.schemas.meeting import (
     MeetingCreate,
@@ -419,6 +420,7 @@ def delete_meeting(meeting_id: str, db: Session = Depends(get_db)) -> dict:
         db.query(ProcessingTask).filter(ProcessingTask.meeting_id == meeting_id).delete()
         db.query(MeetingInvite).filter(MeetingInvite.meeting_id == meeting_id).delete()
         db.query(MeetingParticipant).filter(MeetingParticipant.meeting_id == meeting_id).delete()
+        db.query(MeetingContent).filter(MeetingContent.meeting_id == meeting_id).delete()
         # Delete Meeting row
         db.delete(meeting)
         db.commit()

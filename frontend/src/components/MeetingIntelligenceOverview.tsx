@@ -14,7 +14,8 @@ import {
   Plus,
   X,
   Bot,
-  Trash2
+  Trash2,
+  Hash
 } from 'lucide-react';
 import { Meeting } from '../types';
 import { CocoProcessingModal } from './CocoProcessingModal';
@@ -309,6 +310,12 @@ export const MeetingIntelligenceOverview: React.FC<Props> = ({ meetings, onSelec
                       <Users className="w-3.5 h-3.5 text-slate-400" />
                       {attendees.length} attendee{attendees.length !== 1 ? 's' : ''}
                     </span>
+                    {m.roomCode && (
+                      <span className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-full font-mono font-bold text-[10px]">
+                        <Hash className="w-2.5 h-2.5 text-blue-500" />
+                        {m.roomCode}
+                      </span>
+                    )}
                   </div>
                 </div>
 
