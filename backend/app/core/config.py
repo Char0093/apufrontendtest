@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     gemini_api_key: str = ""
     gemini_service_account_file: str = ""
@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     livekit_url: str = "ws://localhost:7880"
     livekit_api_key: str = "devkey"
     livekit_api_secret: str = "secret"
+    app_jwt_secret: str = "dev-app-jwt-secret-change-me-32-bytes-minimum"
+    app_jwt_issuer: str = "corporate-brain"
+    app_jwt_exp_minutes: int = 480
+    google_oauth_client_id: str = ""
 
     # ASR + LLM intelligence pipeline (Phase 2-4)
     deepgram_api_key: str = ""

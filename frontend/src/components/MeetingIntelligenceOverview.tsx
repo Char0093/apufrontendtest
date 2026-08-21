@@ -265,9 +265,17 @@ export const MeetingIntelligenceOverview: React.FC<Props> = ({ meetings, onSelec
               .filter(Boolean);
 
             return (
-              <button
+              <div
                 key={m.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelectMeeting(m)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelectMeeting(m);
+                  }
+                }}
                 className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 text-left shadow-sm hover:shadow-md hover:border-blue-400 dark:hover:border-blue-600 transition-all group flex flex-col justify-between gap-4 cursor-pointer"
               >
                 <div className="space-y-3 w-full">
@@ -339,7 +347,7 @@ export const MeetingIntelligenceOverview: React.FC<Props> = ({ meetings, onSelec
                     </span>
                   )}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_employee, require_access
+from app.core.auth import get_current_employee, require_access, require_meeting_access
 from app.core.config import get_settings
 from app.database.session import get_db
 from app.graph import graph_builder, neo4j_service
@@ -26,7 +26,10 @@ class SetNodeLabelRequest(BaseModel):
 
 
 @router.patch("/graph/node-label")
-def set_node_label(payload: SetNodeLabelRequest) -> dict:
+def set_node_label(
+    payload: SetNodeLabelRequest,
+    caller: Employee = Depends(get_current_employee),
+) -> dict:
     """display_name=None (or omitted) clears the override, reverting to the
     node's real name/title/text/task.
 
@@ -149,7 +152,12 @@ def _build_fallback_meeting_graph(meeting_id: str) -> dict:
 
 
 @router.get("/meeting/{meeting_id}/graph-data")
-def get_meeting_graph_data(meeting_id: str) -> dict:
+def get_meeting_graph_data(
+    meeting_id: str,
+    db: Session = Depends(get_db),
+    caller: Employee = Depends(get_current_employee),
+) -> dict:
+    require_meeting_access(db, meeting_id, caller)
     if not settings.neo4j_uri or "localhost" in settings.neo4j_uri or "127.0.0.1" in settings.neo4j_uri:
         return _build_fallback_meeting_graph(meeting_id)
 

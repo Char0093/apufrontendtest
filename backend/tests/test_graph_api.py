@@ -20,11 +20,54 @@ id ("d2") absent from the earlier decisions-query fixture, reproducing:
 """
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from app.database.session import Base, get_db
 from app.main import app
+from app.models.employee import Employee
 
 client = TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.fixture
+def db_session():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+        app.dependency_overrides.pop(get_db, None)
+
+
+def _auth_headers(db_session) -> dict:
+    # Management bypasses require_meeting_access's per-meeting participant
+    # check (see app/core/auth.py) — these tests exercise dangling-link
+    # shape, not the access-control layer, which has its own coverage in
+    # test_endpoint_auth.py.
+    emp = Employee(name="Graph Tester", email="graph.tester@example.com", is_management=True)
+    db_session.add(emp)
+    db_session.commit()
+    return {"X-User-Name": emp.name}
 
 
 def _assert_no_dangling_links(payload: dict) -> None:
@@ -36,7 +79,7 @@ def _assert_no_dangling_links(payload: dict) -> None:
     assert not dangling, f"link(s) reference a node missing from nodes[]: {dangling}"
 
 
-def test_global_graph_data_has_no_dangling_links_under_concurrent_write():
+def test_global_graph_data_has_no_dangling_links_under_concurrent_write(db_session):
     responses = [
         [{"id": "m1", "title": "Meeting One"}],                      # meetings
         [],                                                            # PARTICIPATED_IN
@@ -48,7 +91,7 @@ def test_global_graph_data_has_no_dangling_links_under_concurrent_write():
           "to_text": "Decision Two (written concurrently)", "message": "conflict"}],  # CONTRADICTS
     ]
     with patch("app.graph.neo4j_service.run_query", side_effect=responses):
-        response = client.get("/graph")
+        response = client.get("/graph", headers=_auth_headers(db_session))
 
     assert response.status_code == 200
     payload = response.json()
@@ -56,7 +99,7 @@ def test_global_graph_data_has_no_dangling_links_under_concurrent_write():
     assert {"decision:d1", "decision:d2"} <= {n["id"] for n in payload["nodes"]}
 
 
-def test_meeting_graph_data_has_no_dangling_links_for_cross_meeting_contradiction():
+def test_meeting_graph_data_has_no_dangling_links_for_cross_meeting_contradiction(db_session):
     responses = [
         [{"id": "m1", "title": "Meeting One"}],                      # meeting lookup
         [],                                                            # participants
@@ -67,7 +110,7 @@ def test_meeting_graph_data_has_no_dangling_links_for_cross_meeting_contradictio
         [{"from_id": "d1", "to_id": "d2", "to_text": "External Decision", "message": "conflict"}],  # CONTRADICTS
     ]
     with patch("app.graph.neo4j_service.run_query", side_effect=responses):
-        response = client.get("/meeting/m1/graph-data")
+        response = client.get("/meeting/m1/graph-data", headers=_auth_headers(db_session))
 
     assert response.status_code == 200
     payload = response.json()

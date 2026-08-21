@@ -474,7 +474,12 @@ interface AppContextType {
   updateCurrentUser: (updated: Partial<UserProfile>) => void;
   switchDemoUser: (employeeId: string) => void;
   isLoggedIn: boolean;
+  sessionExpired: boolean;
   login: (username: string, pass: string) => boolean;
+  loginWithGoogle: (credential: string) => Promise<boolean>;
+  pendingGoogleIdentity: { claimToken: string; googleName: string; options: api.EmployeeOption[] } | null;
+  claimGoogleIdentity: (employeeId: string | null) => Promise<boolean>;
+  cancelGoogleIdentityChoice: () => void;
   logout: () => void;
 
   activeTab: TabType;
@@ -576,6 +581,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       /* ignore */
     }
   }, [isLoggedIn]);
+
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // Set when a Google login doesn't auto-match a known employee — LoginModal
+  // shows `options` and calls claimGoogleIdentity() with the user's pick.
+  const [pendingGoogleIdentity, setPendingGoogleIdentity] = useState<{
+    claimToken: string;
+    googleName: string;
+    options: api.EmployeeOption[];
+  } | null>(null);
+
+  // A Google-issued Bearer token that's expired or otherwise rejected
+  // (see api.ts's authedFetch) drops straight back to the login screen
+  // rather than leaving every authenticated call failing silently.
+  useEffect(() => {
+    api.setUnauthorizedHandler(() => {
+      setSessionExpired(true);
+      setIsLoggedIn(false);
+    });
+    return () => api.setUnauthorizedHandler(null);
+  }, []);
 
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   
@@ -946,6 +972,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const login = (username: string, pass: string) => {
     if (!username.trim()) return false;
+    api.setApiAccessToken(null);
     const cleanName = username.trim();
     const matchedEmp = initialEmployees.find(
       (e) => e.name.toLowerCase() === cleanName.toLowerCase() || e.name.toLowerCase().includes(cleanName.toLowerCase())
@@ -974,10 +1001,72 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return true;
   };
 
+  const applyAuthenticatedUser = (authUser: api.AuthUser) => {
+    const matchedEmp = initialEmployees.find(
+      (e) =>
+        e.email.toLowerCase() === authUser.email.toLowerCase() ||
+        e.name.toLowerCase() === authUser.name.toLowerCase()
+    );
+    setCurrentUser(prev => ({
+      ...prev,
+      id: matchedEmp?.id || authUser.id,
+      name: matchedEmp?.name || authUser.name,
+      email: authUser.email,
+      role: matchedEmp?.role || authUser.title || 'Team Member',
+      title: matchedEmp?.role || authUser.title || 'Team Member',
+      department: matchedEmp?.department || prev.department || 'Corporate Brain',
+      avatarUrl: matchedEmp?.avatarUrl || prev.avatarUrl,
+    }));
+  };
+
+  const loginWithGoogle = async (credential: string) => {
+    try {
+      const result = await api.loginWithGoogleCredential(credential);
+      if (result.status === 'needs_selection') {
+        setPendingGoogleIdentity({
+          claimToken: result.claim_token,
+          googleName: result.google_name,
+          options: result.options,
+        });
+        return true;
+      }
+      applyAuthenticatedUser(result.user);
+      setIsLoggedIn(true);
+      setSessionExpired(false);
+      return true;
+    } catch (err) {
+      console.warn('[Corporate Brain] Google OAuth login failed:', err);
+      api.setApiAccessToken(null);
+      return false;
+    }
+  };
+
+  const claimGoogleIdentity = async (employeeId: string | null) => {
+    if (!pendingGoogleIdentity) return false;
+    try {
+      const auth = await api.claimGoogleIdentity(pendingGoogleIdentity.claimToken, employeeId);
+      applyAuthenticatedUser(auth.user);
+      setIsLoggedIn(true);
+      setSessionExpired(false);
+      setPendingGoogleIdentity(null);
+      return true;
+    } catch (err) {
+      console.warn('[Corporate Brain] Google identity claim failed:', err);
+      return false;
+    }
+  };
+
+  const cancelGoogleIdentityChoice = () => {
+    setPendingGoogleIdentity(null);
+  };
+
   const logout = () => {
     // Clear display state for signed-out view while preserving localStorage history intact
+    api.setApiAccessToken(null);
     setRawCocoChatHistory([]);
     setIsLoggedIn(false);
+    setSessionExpired(false);
+    setPendingGoogleIdentity(null);
   };
 
   const markAsRead = (id: string) => {
@@ -1502,6 +1591,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const switchDemoUser = (employeeId: string) => {
     const emp = employees.find(e => e.id === employeeId || e.name.toLowerCase().includes(employeeId.toLowerCase()));
     if (emp) {
+      // A still-active Google Bearer token outranks X-User-Name on every
+      // request (see api.ts's identityHeaders) and would otherwise keep
+      // authenticating as the pre-switch account regardless of who the UI
+      // now shows as the active persona.
+      api.setApiAccessToken(null);
       setCurrentUser({
         id: emp.id,
         name: emp.name,
@@ -1550,7 +1644,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateCurrentUser,
         switchDemoUser,
         isLoggedIn,
+        sessionExpired,
         login,
+        loginWithGoogle,
+        pendingGoogleIdentity,
+        claimGoogleIdentity,
+        cancelGoogleIdentityChoice,
         logout,
         activeTab,
         setActiveTab,

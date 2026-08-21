@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.api import meetings as meetings_module
 from app.database.session import Base, get_db
 from app.main import app
+from app.models.employee import Employee
 from app.models.meeting import Meeting
 
 
@@ -47,6 +48,17 @@ def client():
     return TestClient(app, raise_server_exceptions=False)
 
 
+def _auth_headers(db_session) -> dict:
+    # Management bypasses require_meeting_access's per-meeting participant
+    # check (see app/core/auth.py) — these tests exercise export's content
+    # and status-code logic, not the access-control layer, which has its
+    # own coverage in test_endpoint_auth.py.
+    emp = Employee(name="Export Tester", email="export.tester@example.com", is_management=True)
+    db_session.add(emp)
+    db_session.commit()
+    return {"X-User-Name": emp.name}
+
+
 FAKE_SUMMARY = {
     "duration": "00:15:20",
     "summary": "The team selected Provider X for Q4.",
@@ -72,7 +84,7 @@ FAKE_SUMMARY = {
 
 
 def test_export_meeting_not_found_returns_404(client, db_session):
-    response = client.get("/meeting/does-not-exist/export")
+    response = client.get("/meeting/does-not-exist/export", headers=_auth_headers(db_session))
     assert response.status_code == 404
 
 
@@ -85,7 +97,7 @@ def test_export_summary_not_ready_returns_202(client, db_session, monkeypatch):
         meetings_module.storage, "get_file", lambda path: (_ for _ in ()).throw(FileNotFoundError())
     )
 
-    response = client.get(f"/meeting/{meeting.id}/export")
+    response = client.get(f"/meeting/{meeting.id}/export", headers=_auth_headers(db_session))
     assert response.status_code == 202
 
 
@@ -100,7 +112,7 @@ def test_export_returns_markdown_report_with_download_headers(client, db_session
         meetings_module.storage, "get_file", lambda path: json.dumps(FAKE_SUMMARY)
     )
 
-    response = client.get(f"/meeting/{meeting.id}/export")
+    response = client.get(f"/meeting/{meeting.id}/export", headers=_auth_headers(db_session))
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")

@@ -14,6 +14,13 @@ const rawBase = (import.meta as any).env?.VITE_API_BASE_URL || (import.meta as a
 export const API_BASE = rawBase.replace(/\/+$/, '');
 
 let currentIdentity: string | null = null;
+let currentAccessToken: string | null = (() => {
+  try {
+    return localStorage.getItem('corporate_brain_access_token');
+  } catch {
+    return null;
+  }
+})();
 
 /** Sets the identity sent as X-User-Name on graph requests — the backend's
  * memory-graph endpoints look this up against their own employee directory
@@ -23,8 +30,115 @@ export function setApiIdentity(name: string): void {
   currentIdentity = name;
 }
 
+export function setApiAccessToken(token: string | null): void {
+  currentAccessToken = token;
+  try {
+    if (token) {
+      localStorage.setItem('corporate_brain_access_token', token);
+    } else {
+      localStorage.removeItem('corporate_brain_access_token');
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function identityHeaders(): Record<string, string> {
+  if (currentAccessToken) return { Authorization: `Bearer ${currentAccessToken}` };
   return currentIdentity ? { 'X-User-Name': currentIdentity } : {};
+}
+
+let onUnauthorized: (() => void) | null = null;
+
+/** Registered by AppContext. A 401 while a Bearer token is in play means
+ * that token is expired/invalid (a bare X-User-Name 401 means "unrecognized
+ * name" instead, which login() already surfaces on its own) — drop the
+ * session back to the login screen instead of letting every subsequent
+ * call fail silently. */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
+async function authedFetch(input: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, init);
+  if (res.status === 401 && currentAccessToken) {
+    setApiAccessToken(null);
+    onUnauthorized?.();
+  }
+  return res;
+}
+
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  title?: string | null;
+  is_management: boolean;
+}
+
+export interface AuthResponse {
+  status: 'ok';
+  access_token: string;
+  token_type: 'bearer';
+  expires_at: number;
+  user: AuthUser;
+}
+
+export interface EmployeeOption {
+  id: string;
+  name: string;
+  title?: string | null;
+}
+
+export interface NeedsSelectionResponse {
+  status: 'needs_selection';
+  claim_token: string;
+  google_name: string;
+  options: EmployeeOption[];
+}
+
+export type GoogleLoginResult = AuthResponse | NeedsSelectionResponse;
+
+function _applyAuthResponse(auth: AuthResponse): void {
+  setApiAccessToken(auth.access_token);
+  currentIdentity = auth.user.name;
+}
+
+/** First step of Google sign-in. Returns either an immediate AuthResponse
+ * (the Google email or display name matched a known employee) or a
+ * NeedsSelectionResponse — no employee auto-matched, so the caller should
+ * show `options` and follow up with claimGoogleIdentity(). */
+export async function loginWithGoogleCredential(credential: string): Promise<GoogleLoginResult> {
+  const res = await fetch(`${API_BASE}/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `Google login failed: ${res.status}`);
+  }
+  const result: GoogleLoginResult = await res.json();
+  if (result.status === 'ok') _applyAuthResponse(result);
+  return result;
+}
+
+/** Second step after a NeedsSelectionResponse: pass employeeId to attach
+ * the verified Google identity to that existing employee, or null to
+ * create a brand-new employee instead (today's old default behavior). */
+export async function claimGoogleIdentity(claimToken: string, employeeId: string | null): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/google/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ claim_token: claimToken, employee_id: employeeId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `Identity claim failed: ${res.status}`);
+  }
+  const auth: AuthResponse = await res.json();
+  _applyAuthResponse(auth);
+  return auth;
 }
 
 // ── Backend response shapes (docs/IMPLEMENTATION_PLAN.md Phase 5) ─────────
@@ -147,7 +261,7 @@ export interface BackendDashboard {
 // ── Raw fetch calls ─────────────────────────────────────────────────────
 
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { headers: identityHeaders() });
+  const res = await authedFetch(`${API_BASE}${path}`, { headers: identityHeaders() });
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
   return res.json();
 }
@@ -165,7 +279,7 @@ export async function listMeetings(): Promise<BackendMeetingListItem[]> {
  * queued, still processing) resolves to null like a summary genuinely
  * unavailable, rather than a malformed one. */
 async function apiGetOrNullIfNotReady<T>(path: string): Promise<T | null> {
-  const res = await fetch(`${API_BASE}${path}`, { headers: identityHeaders() });
+  const res = await authedFetch(`${API_BASE}${path}`, { headers: identityHeaders() });
   if (res.status === 202) return null;
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
   return res.json();
@@ -213,7 +327,7 @@ export async function setNodeDisplayName(
   identifier: string,
   displayName?: string
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/graph/node-label`, {
+  const res = await authedFetch(`${API_BASE}/graph/node-label`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...identityHeaders() },
     body: JSON.stringify({ node_type: nodeType, identifier, display_name: displayName ?? null }),
@@ -233,7 +347,7 @@ export async function scheduleMeeting(payload: {
   department?: string;
   participant_names?: string[];
 }): Promise<BackendMeetingListItem> {
-  const res = await fetch(`${API_BASE}/meetings`, {
+  const res = await authedFetch(`${API_BASE}/meetings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...identityHeaders() },
     body: JSON.stringify(payload),
@@ -243,7 +357,7 @@ export async function scheduleMeeting(payload: {
 }
 
 export async function setMeetingRsvp(meetingId: string, status: 'accepted' | 'declined'): Promise<void> {
-  const res = await fetch(`${API_BASE}/meetings/${meetingId}/rsvp`, {
+  const res = await authedFetch(`${API_BASE}/meetings/${meetingId}/rsvp`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...identityHeaders() },
     body: JSON.stringify({ status }),
@@ -299,7 +413,7 @@ export async function getNotifications(): Promise<Notification[]> {
 }
 
 export async function markNotificationRead(notificationId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/notifications/${notificationId}/read`, {
+  const res = await authedFetch(`${API_BASE}/notifications/${notificationId}/read`, {
     method: 'PATCH',
     headers: identityHeaders(),
   });
@@ -307,7 +421,7 @@ export async function markNotificationRead(notificationId: string): Promise<void
 }
 
 export async function markAllNotificationsRead(): Promise<void> {
-  const res = await fetch(`${API_BASE}/notifications/read-all`, {
+  const res = await authedFetch(`${API_BASE}/notifications/read-all`, {
     method: 'POST',
     headers: identityHeaders(),
   });
@@ -337,7 +451,7 @@ export async function getDirectMessages(): Promise<BackendDirectMessageItem[]> {
 }
 
 export async function sendDirectMessageApi(receiverName: string, text: string): Promise<BackendDirectMessageItem> {
-  const res = await fetch(`${API_BASE}/messages`, {
+  const res = await authedFetch(`${API_BASE}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...identityHeaders() },
     body: JSON.stringify({ receiver_name: receiverName, text }),
@@ -347,7 +461,7 @@ export async function sendDirectMessageApi(receiverName: string, text: string): 
 }
 
 export async function markThreadRead(otherName: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/messages/${encodeURIComponent(otherName)}/read-all`, {
+  const res = await authedFetch(`${API_BASE}/messages/${encodeURIComponent(otherName)}/read-all`, {
     method: 'POST',
     headers: identityHeaders(),
   });
@@ -377,7 +491,7 @@ export async function appendCocoMessage(
   text: string,
   citations: Array<{ filename: string; timestamp: string; speaker: string; excerpt?: string }> = []
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/coco/history`, {
+  const res = await authedFetch(`${API_BASE}/coco/history`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...identityHeaders() },
     body: JSON.stringify({ role, text, citations }),
@@ -386,7 +500,7 @@ export async function appendCocoMessage(
 }
 
 export async function clearCocoHistoryApi(): Promise<void> {
-  const res = await fetch(`${API_BASE}/coco/history`, {
+  const res = await authedFetch(`${API_BASE}/coco/history`, {
     method: 'DELETE',
     headers: identityHeaders(),
   });
@@ -436,15 +550,15 @@ export async function uploadMeeting(
   formData.append('title', title);
   if (project) formData.append('project', project);
 
-  const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
+  const res = await authedFetch(`${API_BASE}/upload`, { method: 'POST', headers: identityHeaders(), body: formData });
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
   return res.json();
 }
 
 export async function askCoco(query: string): Promise<BackendQueryResponse> {
-  const res = await fetch(`${API_BASE}/query`, {
+  const res = await authedFetch(`${API_BASE}/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...identityHeaders() },
     body: JSON.stringify({ query }),
   });
   if (!res.ok) throw new Error(`Ask Coco failed: ${res.status}`);
@@ -465,7 +579,7 @@ export function getMeetingExportUrl(meetingId: string): string {
  * user-readable message on failure (e.g. meeting not on the backend yet,
  * or still processing) — caller decides how to surface it. */
 export async function downloadMeetingReport(meetingId: string, suggestedFilename: string): Promise<void> {
-  const res = await fetch(getMeetingExportUrl(meetingId));
+  const res = await authedFetch(getMeetingExportUrl(meetingId), { headers: identityHeaders() });
   if (!res.ok) {
     if (res.status === 202) throw new Error('Report not ready yet — this meeting is still processing.');
     if (res.status === 404) throw new Error('This meeting has no exportable report on the backend yet.');
@@ -814,7 +928,7 @@ export async function analyzeTranscript(
 
 export async function deleteMeeting(meetingId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/meeting/${meetingId}`, { method: 'DELETE' });
+    const res = await authedFetch(`${API_BASE}/meeting/${meetingId}`, { method: 'DELETE', headers: identityHeaders() });
     return res.ok;
   } catch {
     return false;

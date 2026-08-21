@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_employee
+from app.core.auth import get_current_employee, require_meeting_access
 from app.core.logger import get_logger
 from app.database.session import get_db
 from app.models.employee import Employee, MeetingParticipant
@@ -134,13 +134,14 @@ async def upload_meeting(
     title: str | None = Form(None),
     project: str | None = Form(None),
     db: Session = Depends(get_db),
+    caller: Employee = Depends(get_current_employee),
 ) -> MeetingCreateResponse:
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=415, detail=f"Unsupported file type: {ext or '(none)'}")
 
     meeting_title = title or Path(file.filename).stem
-    meeting = Meeting(title=meeting_title, project=project, status="queued", source="upload")
+    meeting = Meeting(title=meeting_title, project=project, status="queued", source="upload", host_name=caller.name)
     db.add(meeting)
     db.commit()
     db.refresh(meeting)
@@ -165,7 +166,11 @@ async def upload_meeting(
 
 
 @router.get("/task/{meeting_id}/status", response_model=MeetingStatusResponse)
-def get_task_status(meeting_id: str, db: Session = Depends(get_db)) -> MeetingStatusResponse:
+def get_task_status(
+    meeting_id: str,
+    db: Session = Depends(get_db),
+    caller: Employee = Depends(get_current_employee),
+) -> MeetingStatusResponse:
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     if meeting is None:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
@@ -268,10 +273,15 @@ def list_meetings(
 
 # ── Task 5.2 — Transcript ──────────────────────────────────────────────
 @router.get("/meeting/{meeting_id}/transcript")
-def get_meeting_transcript(meeting_id: str, db: Session = Depends(get_db)) -> dict:
+def get_meeting_transcript(
+    meeting_id: str,
+    db: Session = Depends(get_db),
+    caller: Employee = Depends(get_current_employee),
+) -> dict:
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     if meeting is None:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+    require_meeting_access(db, meeting_id, caller)
 
     transcript = storage.get_transcript(meeting_id)
     if transcript is None:
@@ -281,10 +291,15 @@ def get_meeting_transcript(meeting_id: str, db: Session = Depends(get_db)) -> di
 
 # ── Task 5.3 — Summary (decisions, action items, flags) ────────────────
 @router.get("/meeting/{meeting_id}/summary")
-def get_meeting_summary(meeting_id: str, db: Session = Depends(get_db)) -> dict:
+def get_meeting_summary(
+    meeting_id: str,
+    db: Session = Depends(get_db),
+    caller: Employee = Depends(get_current_employee),
+) -> dict:
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     if meeting is None:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+    require_meeting_access(db, meeting_id, caller)
 
     summary = storage.get_summary(meeting_id)
     if summary is None:
@@ -294,10 +309,15 @@ def get_meeting_summary(meeting_id: str, db: Session = Depends(get_db)) -> dict:
 
 # ── Task 7.2 — Export Report ────────────────────────────────────────────
 @router.get("/meeting/{meeting_id}/export")
-def export_meeting_report(meeting_id: str, db: Session = Depends(get_db)) -> Response:
+def export_meeting_report(
+    meeting_id: str,
+    db: Session = Depends(get_db),
+    caller: Employee = Depends(get_current_employee),
+) -> Response:
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     if meeting is None:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+    require_meeting_access(db, meeting_id, caller)
 
     summary = storage.get_summary(meeting_id)
     if summary is None:
@@ -417,12 +437,18 @@ def analyze_transcript_endpoint(req: AnalyzeTranscriptRequest):
 
 
 @router.delete("/meeting/{meeting_id}", status_code=200)
-def delete_meeting(meeting_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_meeting(
+    meeting_id: str,
+    db: Session = Depends(get_db),
+    caller: Employee = Depends(get_current_employee),
+) -> dict:
     from app.graph import graph_builder
     from app.services import embedding_service
 
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     if meeting is not None:
+        if not caller.is_management and caller.name.lower() != (meeting.host_name or "").lower():
+            raise HTTPException(status_code=403, detail=f"Not authorized to delete meeting {meeting_id}")
         # Delete every row that has a hard foreign key to this meeting first —
         # otherwise db.delete(meeting) hits a Postgres FK violation, the
         # whole transaction rolls back silently, and the "deleted" meeting
