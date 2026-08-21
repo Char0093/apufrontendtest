@@ -55,6 +55,15 @@ engine = create_engine(
     # fix.
     pool_size=10,
     max_overflow=10,
+    # Confirmed live again post-deploy: a request can still hang 30s+ with
+    # every mitigation above in place, because none of them bound the wait
+    # for a free connection *slot* when the pool itself is momentarily
+    # exhausted (multiple browser tabs each polling /meetings on their own
+    # 10s timer, each fanning out per-meeting). That wait silently uses
+    # SQLAlchemy's default pool_timeout of 30s. Bounding it short here means
+    # exhaustion surfaces as a fast, clear "pool exhausted" error instead of
+    # a request that looks identical to a dead server from the caller's side.
+    pool_timeout=8,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
