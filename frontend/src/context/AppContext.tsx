@@ -26,6 +26,44 @@ function ensureCurrentUserIsParticipant(meeting: Meeting, currentUserName: strin
   return alreadyListed ? meeting : { ...meeting, participants: [...meeting.participants, currentUserName] };
 }
 
+/** Whether a freshly-merged meeting says anything the one already in state
+ * didn't. The 10s poll re-derives every meeting from scratch, so without
+ * this check `setMeetings` handed React a new array of new objects on every
+ * tick even when the backend had returned byte-identical data — re-rendering
+ * every consumer and, for the graph views, throwing away a settled force
+ * layout (see KnowledgeGraphView's fingerprint gate for the other half).
+ *
+ * The heavy arrays are compared by reference on purpose, not deep-equality:
+ * when nothing was re-fetched, mergeBackendIntoMeeting falls back to the
+ * very same array instances it was handed, so identity is both exact and
+ * O(1) here. A re-fetch always produces new instances and is correctly
+ * reported as changed. Only `participants` needs a value comparison — it's
+ * rebuilt from JSON on every response. */
+function isMeetingUnchanged(next: Meeting, previous: Meeting): boolean {
+  if (next === previous) return true;
+
+  const scalars: (keyof Meeting)[] = [
+    'id', 'title', 'project', 'dateTime', 'timeRange', 'department', 'status',
+    'duration', 'summary', 'audioFileName', 'fileSize', 'completedAt',
+    'roomCode', 'hostName', 'source',
+  ];
+  for (const key of scalars) {
+    if (next[key] !== previous[key]) return false;
+  }
+
+  const byReference: (keyof Meeting)[] = [
+    'decisions', 'actionItems', 'transcript', 'contradictions', 'graphData',
+  ];
+  for (const key of byReference) {
+    if (next[key] !== previous[key]) return false;
+  }
+
+  const a = next.participants || [];
+  const b = previous.participants || [];
+  if (a.length !== b.length) return false;
+  return a.every((p, i) => p === b[i]);
+}
+
 // Mock Employees Directory
 const initialEmployees: Employee[] = [
   {
@@ -891,7 +929,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // in every "my meetings" personalized view (Dashboard, Meeting
           // Intelligence both filter on participant name) from the very
           // first page load, even though it's genuinely fully processed.
-          loaded.push(ensureCurrentUserIsParticipant(result.value, currentUser.name));
+          const merged = ensureCurrentUserIsParticipant(result.value, currentUser.name);
+          // Hand back the object already in state when the poll learned
+          // nothing new, so the array below can be recognised as unchanged.
+          const previous = meetingsRef.current.find((m) => m.id === merged.id);
+          loaded.push(previous && isMeetingUnchanged(merged, previous) ? previous : merged);
         } else {
           console.error(`[Corporate Brain] Failed to load meeting ${items[i].id} ("${items[i].title}"):`, result.reason);
         }
@@ -913,10 +955,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       rememberServerMeetingIds();
 
       if (loaded.length > 0 || deletedIds.size > 0) {
-        setMeetings((prev) => [
-          ...loaded,
-          ...prev.filter((m) => !loaded.some((l) => l.id === m.id) && !deletedIds.has(m.id)),
-        ]);
+        setMeetings((prev) => {
+          const next = [
+            ...loaded,
+            ...prev.filter((m) => !loaded.some((l) => l.id === m.id) && !deletedIds.has(m.id)),
+          ];
+          // Returning `prev` makes React skip the re-render outright — the
+          // difference between "the poll ran" and "anything changed".
+          const identical =
+            next.length === prev.length && next.every((m, i) => m === prev[i]);
+          return identical ? prev : next;
+        });
       }
     } catch (e) {
       console.warn('[Corporate Brain] Backend not reachable, staying on demo data:', e);

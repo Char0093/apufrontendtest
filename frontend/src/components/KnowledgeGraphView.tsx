@@ -113,6 +113,9 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
   const { sendDirectMessage, refreshMeetings } = useApp();
   const { isDark } = useTheme();
   const fgRef = useRef<any>();
+  // Set when the graph changed and is owed a zoom-to-fit; consumed by
+  // onEngineStop once the force simulation has cooled.
+  const pendingFitRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // react-force-graph-2d's own auto-sizing measures the container on mount
@@ -366,14 +369,12 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
       fgRef.current.d3Force('charge')?.strength(-1000).distanceMax(1200);
       fgRef.current.d3Force('link')?.distance(220);
       fgRef.current.d3ReheatSimulation();
-
-      const timer = setTimeout(() => {
-        if (fgRef.current && fgRef.current.zoomToFit) {
-          fgRef.current.zoomToFit(400, 50);
-        }
-      }, 250);
-
-      return () => clearTimeout(timer);
+      // Fit once the layout has actually settled (onEngineStop below), not
+      // on a fixed 250ms timer. The timer fired while the simulation was
+      // still spreading nodes apart, so it framed a layout that no longer
+      // existed a moment later and nodes ended up drifting outside the
+      // fitted viewport — reading as nodes having gone missing.
+      pendingFitRef.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeetingId, activeGraphData, dimensions.width, dimensions.height]);
@@ -567,6 +568,11 @@ export const KnowledgeGraphView: React.FC<KnowledgeGraphViewProps> = ({
           graphData={activeGraphData}
           cooldownTicks={100}
           d3VelocityDecay={0.3}
+          onEngineStop={() => {
+            if (!pendingFitRef.current) return;
+            pendingFitRef.current = false;
+            fgRef.current?.zoomToFit?.(400, 50);
+          }}
           nodeRelSize={6}
           onNodeClick={handleNodeClick}
           onNodeDrag={(node: any) => setDraggedNode(node as GraphNode)}
