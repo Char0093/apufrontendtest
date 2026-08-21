@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_employee
 from app.core.logger import get_logger
 from app.database.session import get_db
-from app.models.employee import Employee
+from app.models.employee import Employee, MeetingParticipant
 from app.models.meeting import Meeting, MeetingInvite, ProcessingTask
 from app.models.notification import NotificationRecord
 from app.schemas.meeting import (
@@ -412,8 +412,13 @@ def delete_meeting(meeting_id: str, db: Session = Depends(get_db)) -> dict:
 
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     if meeting is not None:
-        # Delete task records
+        # Delete every row that has a hard foreign key to this meeting first —
+        # otherwise db.delete(meeting) hits a Postgres FK violation, the
+        # whole transaction rolls back silently, and the "deleted" meeting
+        # is still there on the next fetch.
         db.query(ProcessingTask).filter(ProcessingTask.meeting_id == meeting_id).delete()
+        db.query(MeetingInvite).filter(MeetingInvite.meeting_id == meeting_id).delete()
+        db.query(MeetingParticipant).filter(MeetingParticipant.meeting_id == meeting_id).delete()
         # Delete Meeting row
         db.delete(meeting)
         db.commit()
