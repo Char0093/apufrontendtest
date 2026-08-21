@@ -9,13 +9,30 @@ logger = get_logger(__name__)
 
 _connect_args = (
     {"check_same_thread": False} if settings.database_url.startswith("sqlite")
-    # No timeout here meant a stalled/unreachable Postgres (a suspended
-    # Neon compute that fails to resume, a stale connection string, a
-    # network-level black hole) hung every DB-touching request forever,
-    # with no error and no way for a caller to distinguish "still working"
-    # from "will never respond" -- 10s fails fast with an actual error
-    # instead of hanging indefinitely.
-    else {"connect_timeout": 10}
+    else {
+        # Bounds only the initial TCP handshake/login — confirmed live that
+        # this alone isn't enough: a request can hang past 25s even with
+        # this set, because the connection succeeds but the query itself
+        # never gets a response (a Neon compute that "resumed" but isn't
+        # actually answering, a held lock, a half-dead connection with no
+        # keepalive to notice). statement_timeout below is what actually
+        # bounds that.
+        "connect_timeout": 10,
+        # Server-side cap on any single query, in ms — this is the one that
+        # matters for a stuck-after-connect hang: Postgres itself cancels
+        # the query and returns an error instead of the process blocking on
+        # a response that may never come. Also bounds pool_pre_ping's own
+        # check query, which would otherwise hang the same way on a
+        # connection that looks alive but isn't answering.
+        "options": "-c statement_timeout=15000",
+        # TCP keepalives so a connection whose peer vanished without a
+        # clean close (dropped mid-session, not just idle) gets detected
+        # and killed within ~30s instead of sitting open forever.
+        "keepalives": 1,
+        "keepalives_idle": 10,
+        "keepalives_interval": 5,
+        "keepalives_count": 3,
+    }
 )
 engine = create_engine(
     settings.database_url,
