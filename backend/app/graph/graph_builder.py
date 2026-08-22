@@ -41,11 +41,27 @@ def build_from_meeting(
     title: str,
     project: str | None,
     intelligence: MeetingIntelligence,
+    date: str | None = None,
 ) -> None:
     """MERGE this meeting's Meeting/Person/Decision/ActionItem nodes and
     relationships into the graph. Uses deterministic ids so re-processing the
-    same meeting updates in place instead of duplicating."""
-    run_query("MERGE (m:Meeting {id: $id}) SET m.title = $title", id=meeting_id, title=title)
+    same meeting updates in place instead of duplicating.
+
+    `date` should be an ISO 8601 timestamp (so lexicographic Cypher string
+    ordering matches chronological order) — without it, every Meeting node's
+    `date` property is missing, and dashboard_service.get_dashboard()'s
+    `ORDER BY m.date DESC LIMIT 10` has nothing to sort on: Neo4j always
+    places NULL last with no stable tiebreaker among ties, so which meetings
+    land in the top 10 becomes arbitrary per query — a meeting can appear in
+    one dashboard refresh and be gone from the next with no data change at
+    all. Confirmed live via Neo4j's own UnknownPropertyKeyWarning on that
+    query."""
+    run_query(
+        "MERGE (m:Meeting {id: $id}) SET m.title = $title, m.date = $date",
+        id=meeting_id,
+        title=title,
+        date=date,
+    )
 
     if project:
         run_query(

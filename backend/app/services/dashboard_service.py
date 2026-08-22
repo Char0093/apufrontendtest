@@ -21,7 +21,8 @@ def get_dashboard(user_id: str) -> dict:
         )
         upcoming_meetings = run_query(
             "MATCH (p:Person {name: $user_id})-[:PARTICIPATED_IN]->(m:Meeting) "
-            "RETURN m.id AS id, m.title AS title ORDER BY m.date DESC LIMIT 10",
+            "RETURN m.id AS id, m.title AS title "
+            "ORDER BY coalesce(m.date, '') DESC LIMIT 10",
             user_id=user_id,
         )
         return {

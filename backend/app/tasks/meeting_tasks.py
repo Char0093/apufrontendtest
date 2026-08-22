@@ -201,7 +201,13 @@ def _save_and_graph(meeting: Meeting, intelligence: MeetingIntelligence) -> None
     })
 
     try:
-        graph_builder.build_from_meeting(meeting.id, meeting.title, meeting.project, intelligence)
+        graph_builder.build_from_meeting(
+            meeting.id,
+            meeting.title,
+            meeting.project,
+            intelligence,
+            date=meeting.created_at.isoformat() if meeting.created_at else None,
+        )
 
         for flag in intelligence.flags:
             if flag.source_decision_text and flag.contradicts_meeting_id and flag.contradicts_decision_text:
